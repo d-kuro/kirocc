@@ -1,0 +1,62 @@
+version: 2
+
+builds:
+  - id: kirocc
+    main: ./cmd/kirocc
+    binary: kirocc
+    env:
+      - CGO_ENABLED=0
+      - GOEXPERIMENT=jsonv2
+    flags:
+      - -trimpath
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: kirocc
+    ids:
+      - kirocc
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+
+homebrew_casks:
+  - repository:
+      owner: d-kuro
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/d-kuro/kirocc"
+    description: "Local proxy server that relays Anthropic Messages API requests to the Kiro backend"
+    license: "Apache-2.0"
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/kirocc"]
+          end
+
+release:
+  draft: false
+  prerelease: auto
