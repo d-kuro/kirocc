@@ -34,6 +34,12 @@ func TestResolve(t *testing.T) {
 			wantContextWindow: DefaultContextWindowSize,
 		},
 		{
+			name:              "kiro model name claude-sonnet-4.6 without thinking suffix",
+			model:             "claude-sonnet-4.6",
+			wantKiroModel:     "claude-sonnet-4.6",
+			wantContextWindow: DefaultContextWindowSize,
+		},
+		{
 			name:              "claude-sonnet-4-6 with thinking suffix",
 			model:             "claude-sonnet-4-6[1m]",
 			wantKiroModel:     "claude-sonnet-4.6-1m",
@@ -41,17 +47,11 @@ func TestResolve(t *testing.T) {
 			wantContextWindow: ThinkingContextWindowSize,
 		},
 		{
-			name:              "claude-sonnet-4-20250514",
-			model:             "claude-sonnet-4-20250514",
-			wantKiroModel:     "claude-sonnet-4",
-			wantContextWindow: DefaultContextWindowSize,
-		},
-		{
-			name:              "claude-sonnet-4 with thinking suffix passthrough",
+			name:              "claude-sonnet-4 with thinking suffix passthrough no 1m variant",
 			model:             "claude-sonnet-4[1m]",
-			wantKiroModel:     "claude-sonnet-4-1m",
+			wantKiroModel:     "claude-sonnet-4",
 			wantThinking:      true,
-			wantContextWindow: ThinkingContextWindowSize,
+			wantContextWindow: DefaultContextWindowSize,
 		},
 		{
 			name:              "claude-haiku-4.5",
@@ -60,9 +60,37 @@ func TestResolve(t *testing.T) {
 			wantContextWindow: DefaultContextWindowSize,
 		},
 		{
+			name:              "claude-haiku-4.5 with thinking suffix no 1m variant",
+			model:             "claude-haiku-4.5[1m]",
+			wantKiroModel:     "claude-haiku-4.5",
+			wantThinking:      true,
+			wantContextWindow: DefaultContextWindowSize,
+		},
+		{
+			name:              "kiro model name claude-sonnet-4.6 with thinking suffix resolves to 1m",
+			model:             "claude-sonnet-4.6[1m]",
+			wantKiroModel:     "claude-sonnet-4.6-1m",
+			wantThinking:      true,
+			wantContextWindow: ThinkingContextWindowSize,
+		},
+		{
+			name:              "kiro model name claude-opus-4.6 with thinking suffix resolves to 1m",
+			model:             "claude-opus-4.6[1m]",
+			wantKiroModel:     "claude-opus-4.6-1m",
+			wantThinking:      true,
+			wantContextWindow: ThinkingContextWindowSize,
+		},
+		{
 			name:              "unknown claude model passthrough",
 			model:             "claude-future-99",
 			wantKiroModel:     "claude-future-99",
+			wantContextWindow: DefaultContextWindowSize,
+		},
+		{
+			name:              "unknown claude model with thinking suffix passthrough",
+			model:             "claude-future-99[1m]",
+			wantKiroModel:     "claude-future-99",
+			wantThinking:      true,
 			wantContextWindow: DefaultContextWindowSize,
 		},
 		{
@@ -153,11 +181,14 @@ func TestListModels(t *testing.T) {
 }
 
 func TestMapping_FieldNames(t *testing.T) {
-	m := Mapping{Anthropic: "claude-test", Kiro: "claude-test-kiro", ContextWindowSize: 100_000}
+	m := Mapping{Anthropic: "claude-test", Kiro: "claude-test-kiro", Kiro1M: "claude-test-kiro-1m", ContextWindowSize: 100_000}
 	if m.Anthropic != "claude-test" {
 		t.Errorf("Anthropic = %q, want %q", m.Anthropic, "claude-test")
 	}
 	if m.Kiro != "claude-test-kiro" {
 		t.Errorf("Kiro = %q, want %q", m.Kiro, "claude-test-kiro")
+	}
+	if m.Kiro1M != "claude-test-kiro-1m" {
+		t.Errorf("Kiro1M = %q, want %q", m.Kiro1M, "claude-test-kiro-1m")
 	}
 }

@@ -11,6 +11,7 @@ import (
 type Mapping struct {
 	Anthropic         string `json:"anthropic"`
 	Kiro              string `json:"kiro"`
+	Kiro1M            string `json:"kiro_1m,omitempty"`
 	ContextWindowSize int    `json:"context_window_size,omitzero"` // 0 means use default
 }
 
@@ -23,22 +24,17 @@ const (
 )
 
 // modelMapOrdered is ordered slice of model mappings.
-// Uses exact key matching.
+// Uses exact key matching against both Anthropic and Kiro fields (first match wins).
+// Order matters: specific entries must precede legacy aliases that share the same Kiro value.
 var modelMapOrdered = []Mapping{
-	{Anthropic: "claude-sonnet-4-6", Kiro: "claude-sonnet-4.6"},
-	{Anthropic: "claude-sonnet-4-20250514", Kiro: "claude-sonnet-4"},
-	{Anthropic: "claude-sonnet-4.5", Kiro: "claude-sonnet-4.5"},
-	{Anthropic: "claude-opus-4-6", Kiro: "claude-opus-4.6"},
-	{Anthropic: "claude-opus-4-20250514", Kiro: "claude-opus-4"},
+	{Anthropic: "claude-sonnet-4-6", Kiro: "claude-sonnet-4.6", Kiro1M: "claude-sonnet-4.6-1m"},
+	{Anthropic: "claude-sonnet-4.5", Kiro: "claude-sonnet-4.5", Kiro1M: "claude-sonnet-4.5-1m"},
+	{Anthropic: "claude-opus-4-6", Kiro: "claude-opus-4.6", Kiro1M: "claude-opus-4.6-1m"},
 	{Anthropic: "claude-opus-4.5", Kiro: "claude-opus-4.5"},
 	{Anthropic: "claude-haiku-4.5", Kiro: "claude-haiku-4.5"},
-	{Anthropic: "claude-3-5-sonnet", Kiro: "claude-sonnet-4.5"},
-	{Anthropic: "claude-3.5-sonnet", Kiro: "claude-sonnet-4.5"},
-	{Anthropic: "claude-3-7-sonnet", Kiro: "claude-sonnet-4.5"},
-	{Anthropic: "claude-3.7-sonnet", Kiro: "claude-sonnet-4.5"},
 }
 
-const DefaultModel = "claude-sonnet-4"
+const DefaultModel = "claude-sonnet-4.6"
 
 // envCache caches parsed env mappings, re-parsing only when the raw string changes.
 var envCache struct {
@@ -87,21 +83,15 @@ func effectiveMappings() []Mapping {
 	return result
 }
 
-const thinkingModelSuffix = "-1m"
-
-// EnsureThinkingModel appends the -1m suffix if not already present.
-func EnsureThinkingModel(kiroModel string) string {
-	if !strings.HasSuffix(kiroModel, thinkingModelSuffix) {
-		return kiroModel + thinkingModelSuffix
-	}
-	return kiroModel
-}
-
-// Resolve maps an Anthropic model name to a Kiro model name and context window size.
+// Resolve maps an Anthropic or Kiro model name to a Kiro model name and context window size.
 // It strips ThinkingSuffix if present (sets thinking=true), then matches
-// against modelMapOrdered using exact equality. If the model starts with
-// "claude-" but has no match, it is passed through as-is. Non-claude models
-// return DefaultModel. KIROCC_MODEL_MAPPINGS env var can override mappings.
+// against effective mappings (env overrides + built-in) on both Anthropic and
+// Kiro fields using first-match semantics. When thinking is true and the
+// matched mapping has a Kiro1M value, that value is used as the model with a
+// 1M context window. If Kiro1M is empty, the base Kiro model is used with
+// its default context window. Unmatched claude-* models are passed through.
+// Non-claude models return DefaultModel.
+// KIROCC_MODEL_MAPPINGS env var can override mappings.
 func Resolve(model string) (kiroModel string, thinking bool, contextWindowSize int) {
 	// Strip thinking suffix
 	if before, ok := strings.CutSuffix(model, ThinkingSuffix); ok {
@@ -110,10 +100,12 @@ func Resolve(model string) (kiroModel string, thinking bool, contextWindowSize i
 	}
 
 	var matchedWindowSize int
+	var matchedKiro1M string
 	var matched bool
 	for _, m := range effectiveMappings() {
-		if model == m.Anthropic {
+		if model == m.Anthropic || model == m.Kiro {
 			kiroModel = m.Kiro
+			matchedKiro1M = m.Kiro1M
 			matchedWindowSize = m.ContextWindowSize
 			matched = true
 			break
@@ -132,13 +124,9 @@ func Resolve(model string) (kiroModel string, thinking bool, contextWindowSize i
 		}
 	}
 
-	// Append -1m suffix for thinking/1M context window models.
-	if thinking {
-		kiroModel = EnsureThinkingModel(kiroModel)
-	}
-
-	// Determine context window size.
-	if thinking {
+	// Use 1M model only when explicitly mapped.
+	if thinking && matchedKiro1M != "" {
+		kiroModel = matchedKiro1M
 		contextWindowSize = ThinkingContextWindowSize
 	} else if matchedWindowSize > 0 {
 		contextWindowSize = matchedWindowSize

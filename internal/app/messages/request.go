@@ -28,7 +28,6 @@ func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 	kiroModel, thinking, _ := models.Resolve(req.Model)
 	if req.IsThinkingEnabled() {
 		thinking = true
-		kiroModel = models.EnsureThinkingModel(kiroModel)
 	}
 
 	payload, err := reqconv.BuildPayload(req, reqconv.BuildOptions{ProfileARN: profileARN, ModelID: kiroModel, Thinking: thinking, ThinkingBudget: 0, EnvState: s.envState})

@@ -39,8 +39,6 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	// Also check the request's thinking field (Anthropic API standard).
 	if req.IsThinkingEnabled() {
 		thinking = true
-		contextWindowSize = models.ThinkingContextWindowSize
-		kiroModel = models.EnsureThinkingModel(kiroModel)
 	}
 
 	contextWindow := fmt.Sprintf("%dk", contextWindowSize/1000)
