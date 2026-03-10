@@ -47,12 +47,6 @@ func TestResolve(t *testing.T) {
 			wantContextWindow: ThinkingContextWindowSize,
 		},
 		{
-			name:              "claude-sonnet-4-20250514",
-			model:             "claude-sonnet-4-20250514",
-			wantKiroModel:     "claude-sonnet-4",
-			wantContextWindow: DefaultContextWindowSize,
-		},
-		{
 			name:              "claude-sonnet-4 with thinking suffix passthrough no 1m variant",
 			model:             "claude-sonnet-4[1m]",
 			wantKiroModel:     "claude-sonnet-4",

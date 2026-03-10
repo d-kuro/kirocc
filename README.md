@@ -198,17 +198,16 @@ The thinking budget is determined by:
 
 ### Model mappings
 
-| Input model                | Kiro model             |
-| -------------------------- | ---------------------- |
-| `claude-sonnet-4-6`        | `claude-sonnet-4.6`    |
-| `claude-sonnet-4-6[1m]`    | `claude-sonnet-4.6-1m` |
-| `claude-sonnet-4.5`        | `claude-sonnet-4.5`    |
-| `claude-sonnet-4.5[1m]`    | `claude-sonnet-4.5-1m` |
-| `claude-sonnet-4-20250514` | `claude-sonnet-4`      |
-| `claude-opus-4-6`          | `claude-opus-4.6`      |
-| `claude-opus-4-6[1m]`      | `claude-opus-4.6-1m`   |
-| `claude-opus-4.5`          | `claude-opus-4.5`      |
-| `claude-haiku-4.5`         | `claude-haiku-4.5`     |
+| Input model             | Kiro model             |
+| ----------------------- | ---------------------- |
+| `claude-sonnet-4-6`     | `claude-sonnet-4.6`    |
+| `claude-sonnet-4-6[1m]` | `claude-sonnet-4.6-1m` |
+| `claude-sonnet-4.5`     | `claude-sonnet-4.5`    |
+| `claude-sonnet-4.5[1m]` | `claude-sonnet-4.5-1m` |
+| `claude-opus-4-6`       | `claude-opus-4.6`      |
+| `claude-opus-4-6[1m]`   | `claude-opus-4.6-1m`   |
+| `claude-opus-4.5`       | `claude-opus-4.5`      |
+| `claude-haiku-4.5`      | `claude-haiku-4.5`     |
 
 Unmatched `claude-*` models are passed through as-is. Non-claude models fall back to `claude-sonnet-4.6`.
 
