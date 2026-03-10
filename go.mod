@@ -6,7 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/lmittmann/tint v1.1.3
 	github.com/pkoukk/tiktoken-go v0.1.8
-	golang.org/x/sync v0.19.0
+	golang.org/x/sync v0.20.0
 	modernc.org/sqlite v1.46.1
 )
 
