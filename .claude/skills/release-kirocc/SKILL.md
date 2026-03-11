@@ -1,11 +1,11 @@
 ---
-name: release
-description: "Guide the kirocc release process step by step: create release branch, write release notes, open PR, tag, and sync GitHub Release. Use this skill whenever the user wants to release a new version, cut a release, create a tag, bump version, or says /release. Takes a version argument like /release v0.1.0."
+name: release-kirocc
+description: "Guide the kirocc release process step by step: create release branch, write release notes, open PR, tag, and sync GitHub Release. Use this skill whenever the user wants to release a new version, cut a release, create a tag, bump version, or says /release-kirocc. Takes a version argument like /release-kirocc v0.1.0."
 ---
 
 # Release
 
-Automate the kirocc release process. Takes a version argument (e.g., `/release v0.1.0`).
+Automate the kirocc release process. Takes a version argument (e.g., `/release-kirocc v0.1.0`).
 
 ## Prerequisites
 
@@ -140,7 +140,7 @@ EOF
 )"
 ```
 
-Tell the user: "PR created. Please merge it once CI passes. After merging, run `/release <version>` again or ask me to proceed with Phase 2."
+Tell the user: "PR created. Please merge it once CI passes. After merging, run `/release-kirocc <version>` again or ask me to proceed with Phase 2."
 
 ### Phase 2: Tag and Publish
 
