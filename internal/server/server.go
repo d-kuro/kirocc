@@ -48,5 +48,4 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /v1/models", s.handleModels)
 	s.mux.HandleFunc("POST /v1/messages/count_tokens", s.messages.HandleCountTokens)
 	s.mux.HandleFunc("POST /v1/messages", s.messages.HandleMessages)
-	s.mux.HandleFunc("POST /api/event_logging/batch", s.handleEventLogging)
 }
