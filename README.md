@@ -102,7 +102,6 @@ export KIROCC_MODEL_MAPPINGS='[{"anthropic":"my-model","kiro":"claude-sonnet-4.5
 | `GET /v1/models`                 | List available models                    |
 | `POST /v1/messages`              | Messages API (streaming / non-streaming) |
 | `POST /v1/messages/count_tokens` | Token count (approximate \*)             |
-| `POST /api/event_logging/batch`  | Event logging (stub, always returns OK)  |
 
 \* `count_tokens` uses the `cl100k_base` encoding from [tiktoken-go](https://github.com/pkoukk/tiktoken-go), which differs from Claude's actual tokenizer. The returned value is an approximation.
 

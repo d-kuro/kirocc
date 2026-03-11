@@ -40,12 +40,3 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 	_, _ = w.Write([]byte("\n"))
 }
-
-func (s *Server) handleEventLogging(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.MarshalWrite(w, map[string]string{"status": "ok"}); err != nil {
-		slog.ErrorContext(r.Context(), "write event logging response failed", "err", err)
-		return
-	}
-	_, _ = w.Write([]byte("\n"))
-}

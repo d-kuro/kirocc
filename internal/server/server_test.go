@@ -199,20 +199,6 @@ func TestCountTokens_EmptyMessages(t *testing.T) {
 	}
 }
 
-func TestEventLoggingBatch(t *testing.T) {
-	srv := newTestServer(t, "", nil)
-	defer srv.Close()
-
-	resp, err := http.Post(srv.URL+"/api/event_logging/batch", "application/json", strings.NewReader(`[]`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 200 {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-}
-
 func TestAPIKeyAuth_Missing(t *testing.T) {
 	srv := newTestServer(t, "secret", nil)
 	defer srv.Close()
