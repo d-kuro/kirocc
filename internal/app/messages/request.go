@@ -25,7 +25,7 @@ func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 		profileARN = creds.ProfileARN
 	}
 
-	kiroModel, thinking, _ := models.Resolve(req.Model)
+	kiroModel, thinking, _ := models.Resolve(req.Model, hasContext1MBeta(r.Header))
 	if req.IsThinkingEnabled() {
 		thinking = true
 	}

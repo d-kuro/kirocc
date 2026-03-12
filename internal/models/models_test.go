@@ -10,6 +10,7 @@ func TestResolve(t *testing.T) {
 		name              string
 		envMappings       string // KIROCC_MODEL_MAPPINGS value; empty = unset
 		model             string
+		context1M         bool
 		wantKiroModel     string
 		wantThinking      bool
 		wantContextWindow int
@@ -23,6 +24,14 @@ func TestResolve(t *testing.T) {
 		{
 			name:              "claude-opus-4-6 with thinking suffix",
 			model:             "claude-opus-4-6[1m]",
+			wantKiroModel:     "claude-opus-4.6-1m",
+			wantThinking:      true,
+			wantContextWindow: ThinkingContextWindowSize,
+		},
+		{
+			name:              "claude-opus-4-6 with context1M resolves to 1m",
+			model:             "claude-opus-4-6",
+			context1M:         true,
 			wantKiroModel:     "claude-opus-4.6-1m",
 			wantThinking:      true,
 			wantContextWindow: ThinkingContextWindowSize,
@@ -47,6 +56,14 @@ func TestResolve(t *testing.T) {
 			wantContextWindow: ThinkingContextWindowSize,
 		},
 		{
+			name:              "claude-sonnet-4-6 with context1M resolves to 1m",
+			model:             "claude-sonnet-4-6",
+			context1M:         true,
+			wantKiroModel:     "claude-sonnet-4.6-1m",
+			wantThinking:      true,
+			wantContextWindow: ThinkingContextWindowSize,
+		},
+		{
 			name:              "claude-sonnet-4 with thinking suffix passthrough no 1m variant",
 			model:             "claude-sonnet-4[1m]",
 			wantKiroModel:     "claude-sonnet-4",
@@ -62,6 +79,14 @@ func TestResolve(t *testing.T) {
 		{
 			name:              "claude-haiku-4.5 with thinking suffix no 1m variant",
 			model:             "claude-haiku-4.5[1m]",
+			wantKiroModel:     "claude-haiku-4.5",
+			wantThinking:      true,
+			wantContextWindow: DefaultContextWindowSize,
+		},
+		{
+			name:              "claude-haiku-4.5 with context1M no 1m variant",
+			model:             "claude-haiku-4.5",
+			context1M:         true,
 			wantKiroModel:     "claude-haiku-4.5",
 			wantThinking:      true,
 			wantContextWindow: DefaultContextWindowSize,
@@ -120,7 +145,7 @@ func TestResolve(t *testing.T) {
 			if tt.envMappings != "" {
 				t.Setenv("KIROCC_MODEL_MAPPINGS", tt.envMappings)
 			}
-			gotModel, gotThinking, gotWindow := Resolve(tt.model)
+			gotModel, gotThinking, gotWindow := Resolve(tt.model, tt.context1M)
 			if gotModel != tt.wantKiroModel {
 				t.Errorf("Resolve(%q) model = %q, want %q", tt.model, gotModel, tt.wantKiroModel)
 			}

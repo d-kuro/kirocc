@@ -3,6 +3,7 @@ package logging
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"strings"
 
@@ -43,7 +44,43 @@ func OTelTraceID(id string) string {
 	return strings.ReplaceAll(id, "-", "")
 }
 
-// NewHandler creates a slog.Handler based on the debug flag.
+// sensitiveHeaders lists header names whose values must be redacted in logs.
+var sensitiveHeaders = map[string]bool{
+	"Authorization":        true,
+	"Proxy-Authorization":  true,
+	"X-Api-Key":            true,
+	"Cookie":               true,
+	"Set-Cookie":           true,
+	"X-Amz-Security-Token": true,
+}
+
+// isSensitiveHeader returns true if the canonicalized header name should be redacted.
+func isSensitiveHeader(name string) bool {
+	if sensitiveHeaders[name] {
+		return true
+	}
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, "-token") || strings.HasSuffix(lower, "-secret")
+}
+
+// SafeHeaders wraps http.Header as a slog.LogValuer so that sanitization
+// (map allocation + string joins) is deferred until the log record is
+// actually emitted. When debug logging is disabled, zero work is done.
+type SafeHeaders struct{ H http.Header }
+
+// LogValue implements slog.LogValuer.
+func (s SafeHeaders) LogValue() slog.Value {
+	attrs := make([]slog.Attr, 0, len(s.H))
+	for k, vs := range s.H {
+		if isSensitiveHeader(k) {
+			attrs = append(attrs, slog.String(k, "[REDACTED]"))
+		} else {
+			attrs = append(attrs, slog.String(k, strings.Join(vs, ", ")))
+		}
+	}
+	return slog.GroupValue(attrs...)
+}
+
 // debug=false: tint colored handler (INFO+)
 // debug=true: OTel JSON Lines handler (DEBUG+)
 func NewHandler(debug bool) slog.Handler {

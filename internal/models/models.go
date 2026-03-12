@@ -92,10 +92,13 @@ func effectiveMappings() []Mapping {
 // its default context window. Unmatched claude-* models are passed through.
 // Non-claude models return DefaultModel.
 // KIROCC_MODEL_MAPPINGS env var can override mappings.
-func Resolve(model string) (kiroModel string, thinking bool, contextWindowSize int) {
+func Resolve(model string, context1M bool) (kiroModel string, thinking bool, contextWindowSize int) {
 	// Strip thinking suffix
 	if before, ok := strings.CutSuffix(model, ThinkingSuffix); ok {
 		model = before
+		thinking = true
+	}
+	if context1M {
 		thinking = true
 	}
 

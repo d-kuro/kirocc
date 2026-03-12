@@ -132,6 +132,11 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 		req.Header.Set("amz-sdk-invocation-id", invocationID)
 		req.Header.Set("amz-sdk-request", fmt.Sprintf("attempt=%d; max=%d", attempt+1, maxRetries+1))
 
+		slog.DebugContext(ctx, "kiro request headers",
+			"trace_id", short,
+			"headers", logging.SafeHeaders{H: req.Header},
+		)
+
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			if attempt < maxRetries {
@@ -149,6 +154,11 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 
 		switch {
 		case resp.StatusCode == http.StatusOK:
+			slog.DebugContext(ctx, "kiro response headers",
+				"trace_id", short,
+				"status", resp.StatusCode,
+				"headers", logging.SafeHeaders{H: resp.Header},
+			)
 			return &Response{
 				StatusCode:   resp.StatusCode,
 				Body:         resp.Body,

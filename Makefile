@@ -2,7 +2,7 @@ export GOEXPERIMENT := jsonv2
 
 BIN := dist/kirocc
 
-.PHONY: build install run test lint fmt fix clean
+.PHONY: build install run debug test lint fmt fix clean
 
 build:
 	go build -o $(BIN) ./cmd/kirocc
@@ -12,6 +12,9 @@ install:
 
 run:
 	go run ./cmd/kirocc
+
+debug:
+	go run ./cmd/kirocc -debug
 
 test:
 	go test -race ./...

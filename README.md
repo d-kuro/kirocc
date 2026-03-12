@@ -187,6 +187,7 @@ The Kiro API does not have a dedicated field for thinking configuration. kirocc 
 Thinking is enabled by any of:
 
 - Model name with `[1m]` suffix (e.g., `claude-sonnet-4-6[1m]`)
+- `Anthropic-Beta` header containing `context-1m` (e.g., `context-1m-2025-01-01`)
 - `thinking.type` set to `"enabled"` or `"adaptive"` in the request
 
 The thinking budget is determined by:
