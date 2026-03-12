@@ -167,7 +167,7 @@ func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, req 
 // hasContext1MBeta checks if the Anthropic-Beta header contains a context-1m flag.
 func hasContext1MBeta(h http.Header) bool {
 	for _, v := range h["Anthropic-Beta"] {
-		for _, beta := range strings.Split(v, ",") {
+		for beta := range strings.SplitSeq(v, ",") {
 			if strings.HasPrefix(strings.TrimSpace(beta), "context-1m") {
 				return true
 			}
