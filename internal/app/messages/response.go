@@ -114,6 +114,10 @@ func (s *Service) handleStreamingResponse(ctx context.Context, w http.ResponseWr
 
 	// Log response completion (only on success).
 	if !streamErr {
+		slog.DebugContext(ctx, "client response headers",
+			"trace_id", short,
+			"headers", logging.SafeHeaders{H: gw.Header()},
+		)
 		inputTokens, outputTokens := sw.Usage()
 		logResponseStats(ctx, short, inputTokens, outputTokens, sw.HasContextUsage(), sw.ContextUsagePercentage(), contextWindowSize)
 	}
@@ -178,6 +182,10 @@ func (s *Service) handleNonStreamingResponse(ctx context.Context, w http.Respons
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	slog.DebugContext(ctx, "client response headers",
+		"trace_id", short,
+		"headers", logging.SafeHeaders{H: w.Header()},
+	)
 	if err := json.MarshalWrite(w, resp); err != nil {
 		slog.ErrorContext(ctx, "write non-streaming response failed", "err", err)
 		return ""
