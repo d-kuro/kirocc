@@ -31,7 +31,7 @@ func KiroToolSearchEntry() kiroproto.ToolEntry {
 							"description": "Query to find deferred tools. Use \"select:<tool_name>\" for direct selection, or keywords to search.",
 						},
 						"max_results": map[string]any{
-							"type":        "number",
+							"type":        "integer",
 							"description": "Maximum number of results to return (default: 5)",
 						},
 					},

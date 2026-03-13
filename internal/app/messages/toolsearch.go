@@ -115,6 +115,10 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 				slog.WarnContext(ctx, "empty visible end_turn detected in tool search", "trace_id", short)
 				return retryReasonEmptyVisibleEndTurn
 			}
+			if streamErr && !gw.IsPromoted() {
+				gw.Discard()
+				WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream stream error")
+			}
 			if !streamErr {
 				inputTokens, outputTokens := sw.Usage()
 				logResponseStats(ctx, short, inputTokens+cumulativeInputTokens, outputTokens+cumulativeOutputTokens, sw.HasContextUsage(), sw.ContextUsagePercentage(), o.contextWindowSize)
@@ -320,7 +324,7 @@ func (o *toolSearchOrchestrator) appendSearchMessages(msgs []anthropic.Message, 
 		anthropic.Message{
 			Role: "assistant",
 			Content: anthropic.MessageContent{Blocks: []anthropic.ContentBlock{
-				{Type: anthropic.BlockTypeServerToolUse, ID: srvToolUseID, Name: o.tsCtx.SearchToolName, Input: searchInput},
+				{Type: anthropic.BlockTypeServerToolUse, ID: srvToolUseID, Name: toolsearch.KiroToolSearchName, Input: searchInput},
 			}},
 		},
 		anthropic.Message{
@@ -362,11 +366,11 @@ func writeStreamingOrJSONError(gw *GateWriter, sw *respconv.SSEWriter, w http.Re
 // parseToolSearchInput extracts query and max_results from the ToolSearch tool input JSON.
 func parseToolSearchInput(input string) (query string, maxResults int) {
 	var parsed struct {
-		Query      string `json:"query"`
-		MaxResults int    `json:"max_results"`
+		Query      string  `json:"query"`
+		MaxResults float64 `json:"max_results"`
 	}
 	if err := json.Unmarshal([]byte(input), &parsed); err != nil {
 		return input, 0
 	}
-	return parsed.Query, parsed.MaxResults
+	return parsed.Query, int(parsed.MaxResults)
 }

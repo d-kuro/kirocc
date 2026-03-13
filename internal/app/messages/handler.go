@@ -117,10 +117,15 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		if retryReason == retryReasonEmptyVisibleEndTurn {
 			slog.WarnContext(r.Context(), "retrying tool search after empty visible end_turn", "trace_id", short)
+			var reason string
 			if req.Stream {
-				orch.handleStreaming(r.Context(), w)
+				reason = orch.handleStreaming(r.Context(), w)
 			} else {
-				orch.handleNonStreaming(r.Context(), w)
+				reason = orch.handleNonStreaming(r.Context(), w)
+			}
+			if reason == retryReasonEmptyVisibleEndTurn {
+				slog.ErrorContext(r.Context(), "tool search retry also returned empty visible end_turn", "trace_id", short)
+				WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream returned empty response")
 			}
 		}
 		return
