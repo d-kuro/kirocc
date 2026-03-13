@@ -17,9 +17,10 @@ func ExtractTextContent(content anthropic.MessageContent) string {
 	var parts []string
 	for _, b := range content.Blocks {
 		switch b.Type {
-		case "text":
+		case anthropic.BlockTypeText:
 			parts = append(parts, b.Text)
-		case "thinking", "tool_use", "tool_result", "image", "tool_reference":
+		case anthropic.BlockTypeThinking, anthropic.BlockTypeToolUse, anthropic.BlockTypeToolResult, anthropic.BlockTypeImage, anthropic.BlockTypeToolReference,
+			anthropic.BlockTypeServerToolUse, anthropic.BlockTypeToolSearchToolResult:
 			// Skip — handled separately.
 		default:
 			// Unknown block type → textualize.

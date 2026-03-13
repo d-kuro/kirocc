@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
+	"github.com/d-kuro/kirocc/internal/toolsearch"
 	"github.com/google/uuid"
 )
 
@@ -80,7 +82,7 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 		if d.TextDelta != "" {
 			s.ensureStarted()
 			s.fireVisibleOutput()
-			s.switchBlock("text")
+			s.switchBlock(anthropic.BlockTypeText)
 			s.writeDelta("text_delta", "text", d.TextDelta)
 		}
 		if d.StopSignal {
@@ -93,12 +95,12 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 			s.ensureStarted()
 			s.closeActiveBlock()
 			s.blockIndex++
-			s.activeType = "redacted_thinking"
+			s.activeType = anthropic.BlockTypeRedactedThinking
 			s.writeSSE("content_block_start", map[string]any{
 				"type":  "content_block_start",
 				"index": s.blockIndex,
 				"content_block": map[string]any{
-					"type": "redacted_thinking",
+					"type": anthropic.BlockTypeRedactedThinking,
 					"data": d.RedactedContent,
 				},
 			})
@@ -130,12 +132,12 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 		s.fireVisibleOutput()
 		s.closeActiveBlock()
 		s.blockIndex++
-		s.activeType = "tool_use"
+		s.activeType = anthropic.BlockTypeToolUse
 		s.writeSSE("content_block_start", map[string]any{
 			"type":  "content_block_start",
 			"index": s.blockIndex,
 			"content_block": map[string]any{
-				"type":  "tool_use",
+				"type":  anthropic.BlockTypeToolUse,
 				"id":    d.ToolUseID,
 				"name":  d.ToolName,
 				"input": map[string]any{},
@@ -188,7 +190,7 @@ func (s *SSEWriter) Finish() {
 		}
 		if textDelta != "" {
 			s.fireVisibleOutput()
-			s.switchBlock("text")
+			s.switchBlock(anthropic.BlockTypeText)
 			s.writeDelta("text_delta", "text", textDelta)
 		}
 	}
@@ -245,17 +247,17 @@ func (s *SSEWriter) switchBlock(blockType string) {
 
 	var contentBlock map[string]any
 	switch blockType {
-	case "thinking":
+	case anthropic.BlockTypeThinking:
 		contentBlock = map[string]any{
-			"type":     "thinking",
+			"type":     anthropic.BlockTypeThinking,
 			"thinking": "",
 		}
 		if s.acc.Signature != "" {
 			contentBlock["signature"] = s.acc.Signature
 		}
-	case "text":
+	case anthropic.BlockTypeText:
 		contentBlock = map[string]any{
-			"type": "text",
+			"type": anthropic.BlockTypeText,
 			"text": "",
 		}
 	}
@@ -295,7 +297,7 @@ func (s *SSEWriter) HasContextUsage() bool { return s.acc.HasContextUsage }
 // writeThinkingDelta writes a thinking_delta SSE event using direct formatting.
 func (s *SSEWriter) writeThinkingDelta(d EventDelta) {
 	s.ensureStarted()
-	s.switchBlock("thinking")
+	s.switchBlock(anthropic.BlockTypeThinking)
 	s.writeDelta("thinking_delta", "thinking", d.ThinkingDelta)
 }
 
@@ -320,6 +322,85 @@ func (s *SSEWriter) IsEmptyVisibleEndTurn() bool {
 // ThinkingLen returns the length of accumulated thinking content.
 func (s *SSEWriter) ThinkingLen() int {
 	return s.acc.ThinkingBuf.Len()
+}
+
+// SetFilterToolName sets the tool name to filter from accumulator recording.
+func (s *SSEWriter) SetFilterToolName(name string) {
+	s.acc.FilterToolName = name
+}
+
+// ResetAccumulator replaces the internal accumulator with a fresh one,
+// preserving the SSEWriter's block index and started state for continuation.
+func (s *SSEWriter) ResetAccumulator(contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int) {
+	filterName := s.acc.FilterToolName
+	s.acc = newAccumulator(contextWindowSize, stopSequences, maxTokens, preCountedInputTokens)
+	s.acc.FilterToolName = filterName
+	s.activeType = ""
+}
+
+// WriteServerToolUse writes a server_tool_use content block start + input delta + stop.
+func (s *SSEWriter) WriteServerToolUse(id, name, input string) {
+	s.ensureStarted()
+	s.fireVisibleOutput()
+	s.closeActiveBlock()
+	s.blockIndex++
+	s.writeSSE("content_block_start", map[string]any{
+		"type":  "content_block_start",
+		"index": s.blockIndex,
+		"content_block": map[string]any{
+			"type":  anthropic.BlockTypeServerToolUse,
+			"id":    id,
+			"name":  name,
+			"input": map[string]any{},
+		},
+	})
+	s.writeSSE("content_block_delta", map[string]any{
+		"type":  "content_block_delta",
+		"index": s.blockIndex,
+		"delta": map[string]any{
+			"type":         "input_json_delta",
+			"partial_json": input,
+		},
+	})
+	s.writeRawSSE("content_block_stop", `{"type":"content_block_stop","index":%d}`, s.blockIndex)
+}
+
+// WriteToolSearchResult writes a tool_search_tool_result content block.
+func (s *SSEWriter) WriteToolSearchResult(toolUseID string, toolRefs []string) {
+	s.closeActiveBlock()
+	s.blockIndex++
+	s.writeSSE("content_block_start", map[string]any{
+		"type":  "content_block_start",
+		"index": s.blockIndex,
+		"content_block": map[string]any{
+			"type":        anthropic.BlockTypeToolSearchToolResult,
+			"tool_use_id": toolUseID,
+			"content": map[string]any{
+				"type":            anthropic.BlockTypeToolSearchSearchResult,
+				"tool_references": toolsearch.ToolRefMaps(toolRefs),
+			},
+		},
+	})
+	s.writeRawSSE("content_block_stop", `{"type":"content_block_stop","index":%d}`, s.blockIndex)
+}
+
+// WriteToolSearchError writes a tool_search_tool_result error content block.
+func (s *SSEWriter) WriteToolSearchError(toolUseID string, errorCode string) {
+	s.closeActiveBlock()
+	s.blockIndex++
+	s.writeSSE("content_block_start", map[string]any{
+		"type":  "content_block_start",
+		"index": s.blockIndex,
+		"content_block": map[string]any{
+			"type":        anthropic.BlockTypeToolSearchToolResult,
+			"tool_use_id": toolUseID,
+			"content": map[string]any{
+				"type":       anthropic.BlockTypeToolSearchResultError,
+				"error_code": errorCode,
+			},
+		},
+	})
+	s.writeRawSSE("content_block_stop", `{"type":"content_block_stop","index":%d}`, s.blockIndex)
 }
 
 func (s *SSEWriter) writeSSE(eventType string, data map[string]any) {

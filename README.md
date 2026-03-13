@@ -12,6 +12,7 @@ Just set `ANTHROPIC_BASE_URL` from any Anthropic API client (e.g., Claude Code) 
 - **Automatic auth management** — Reads credentials from Kiro CLI's SQLite DB with automatic token refresh (Social / OIDC)
 - **Model mapping** — Maps Anthropic model names (e.g., `claude-sonnet-4-6`) to Kiro model names. Customizable via environment variable
 - **Extended Thinking** — Supports `[1m]` suffix, `thinking` field, and `reasoning_effort` / `budget_tokens` for extended thinking mode
+- **Tool Search** — Proxy-side implementation of Anthropic's [Tool Search Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool). Supports `tool_search_tool_regex_20251119` and `tool_search_tool_bm25_20251119` with `defer_loading` for on-demand tool discovery
 - **Prompt Caching** — Converts Anthropic tool-level `cache_control` to Kiro `cachePoint`
 - **Truncation detection** — Automatically injects a notice into the next request when a response is truncated
 - **Retry** — Exponential backoff retry for 403 (token expiry), 429, and 5xx errors. Also retries thinking-only (empty visible) responses
@@ -124,6 +125,7 @@ flowchart TB
             ModelResolve["Model Resolution<br/>claude-sonnet-4-6 → claude-sonnet-4.6"]
             MsgNorm["Message Normalization"]
             ToolConv["Tool & Schema Conversion"]
+            ToolSearch["Tool Search<br/>(regex / BM25)"]
             ThinkingInject["Thinking Injection<br/>(XML tags in content)"]
             CacheConv["Cache Point Conversion<br/>(tool-level only)"]
         end
@@ -160,6 +162,7 @@ flowchart TB
 5. Request conversion pipeline:
    - Normalizes messages (merges consecutive same-role messages, extracts text/images/tool_use/tool_result from multi-block content)
    - Converts tools and sanitizes JSON Schema (removes unsupported keywords, flattens `anyOf`/`oneOf`/`allOf`)
+   - If tool search tools are present, partitions tools into active/deferred and injects a proxy-side `ToolSearch` tool
    - Extracts system prompt and places it as a history entry pair
    - Reorders tool results to match the preceding assistant's tool_use order
    - Injects thinking mode as XML tags (`<thinking_mode>`, `<max_thinking_length>`) into message content
@@ -168,6 +171,7 @@ flowchart TB
 7. Response conversion pipeline:
    - Parses binary event stream frames
    - Converts cumulative text to incremental deltas
+   - Intercepts `ToolSearch` tool_use calls, executes search, emits `server_tool_use`/`tool_search_tool_result` SSE events, and re-requests Kiro with discovered tools (up to 3 rounds)
    - Parses `<thinking>` tags from `assistantResponseEvent` or uses `reasoningContentEvent` (with deduplication)
    - Enforces `stop_sequences` and `max_tokens` adapter-side
    - Detects truncated responses and stores them; a notice is injected into the next request
@@ -195,6 +199,25 @@ The thinking budget is determined by:
 1. `thinking.budget_tokens` if explicitly set
 2. Derived from `thinking.reasoning_effort`: `high` = 31999, `medium` = 10000, `low` = 4000
 3. Default: 10000 (medium)
+
+### Tool Search
+
+The Kiro backend does not support Anthropic's [Tool Search Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool). kirocc implements it proxy-side with an inner loop:
+
+1. Client sends `tool_search_tool_regex_20251119` (or `bm25`) + tools with `defer_loading: true`
+2. Proxy partitions tools into active (sent to Kiro) and deferred (held for search)
+3. Proxy injects a `ToolSearch` tool definition that Kiro can understand
+4. When the model calls `ToolSearch`, the proxy intercepts the tool_use:
+   - Executes regex or BM25 search against deferred tools
+   - Emits `server_tool_use` + `tool_search_tool_result` SSE events to the client
+   - Promotes discovered tools to active and rebuilds the Kiro request
+   - Calls Kiro again with the updated tool list (up to 3 rounds)
+5. When the model calls a regular tool or produces text, the response is forwarded to the client
+
+Supported query forms:
+
+- `select:Read,Edit,Grep` — exact tool selection by name
+- `read file` — keyword search (regex with word-level OR fallback, or BM25 scoring)
 
 ### Model mappings
 

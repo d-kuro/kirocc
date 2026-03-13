@@ -80,7 +80,7 @@ func (mc MessageContent) String() string {
 	}
 	var s string
 	for _, b := range mc.Blocks {
-		if b.Type == "text" {
+		if b.Type == BlockTypeText {
 			if s != "" {
 				s += " "
 			}
@@ -103,6 +103,14 @@ func (mc *MessageContent) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		return json.UnmarshalDecode(dec, &mc.Text)
 	case '[':
 		return json.UnmarshalDecode(dec, &mc.Blocks)
+	case '{':
+		// tool_search_tool_result content is an object — store as single-element Blocks.
+		var block ContentBlock
+		if err := json.UnmarshalDecode(dec, &block); err != nil {
+			return err
+		}
+		mc.Blocks = []ContentBlock{block}
+		return nil
 	default:
 		return fmt.Errorf("unexpected content type: %v", dec.PeekKind())
 	}
@@ -119,7 +127,7 @@ type ContentBlock struct {
 	Thinking  string `json:"thinking,omitempty"`
 	Signature string `json:"signature,omitempty"`
 
-	// tool_use block (assistant)
+	// tool_use / server_tool_use block (assistant)
 	ID    string         `json:"id,omitempty"`
 	Name  string         `json:"name,omitempty"`
 	Input map[string]any `json:"input,omitempty"`
@@ -135,8 +143,21 @@ type ContentBlock struct {
 	// tool_reference block
 	ToolName string `json:"tool_name,omitempty"`
 
+	// tool_search_tool_search_result (nested inside tool_search_tool_result content)
+	ToolReferences []ContentBlock `json:"tool_references,omitempty"`
+
 	// cache_control (prompt caching)
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+// IsToolUse reports whether this block is a tool_use or server_tool_use block.
+func (b ContentBlock) IsToolUse() bool {
+	return b.Type == BlockTypeToolUse || b.Type == BlockTypeServerToolUse
+}
+
+// IsToolResult reports whether this block is a tool_result or tool_search_tool_result block.
+func (b ContentBlock) IsToolResult() bool {
+	return b.Type == BlockTypeToolResult || b.Type == BlockTypeToolSearchToolResult
 }
 
 // ImageSource represents the source of an image content block.
@@ -151,12 +172,40 @@ type CacheControl struct {
 	Type string `json:"type"`
 }
 
+// Tool Search Tool type constants.
+const (
+	ToolTypeSearchRegex = "tool_search_tool_regex_20251119"
+	ToolTypeSearchBM25  = "tool_search_tool_bm25_20251119"
+)
+
+// Content block type constants.
+const (
+	BlockTypeText                   = "text"
+	BlockTypeThinking               = "thinking"
+	BlockTypeImage                  = "image"
+	BlockTypeToolUse                = "tool_use"
+	BlockTypeServerToolUse          = "server_tool_use"
+	BlockTypeToolResult             = "tool_result"
+	BlockTypeToolSearchToolResult   = "tool_search_tool_result"
+	BlockTypeToolReference          = "tool_reference"
+	BlockTypeToolSearchSearchResult = "tool_search_tool_search_result"
+	BlockTypeToolSearchResultError  = "tool_search_tool_result_error"
+	BlockTypeRedactedThinking       = "redacted_thinking"
+)
+
 // Tool represents a tool definition in the Anthropic API.
 type Tool struct {
-	Name         string         `json:"name"`
-	Description  string         `json:"description"`
-	InputSchema  map[string]any `json:"input_schema"`
+	Type         string         `json:"type,omitempty"`
+	Name         string         `json:"name,omitempty"`
+	Description  string         `json:"description,omitempty"`
+	InputSchema  map[string]any `json:"input_schema,omitempty"`
 	CacheControl *CacheControl  `json:"cache_control,omitempty"`
+	DeferLoading bool           `json:"defer_loading,omitzero"`
+}
+
+// IsToolSearchTool reports whether this tool is a tool search tool definition.
+func (t Tool) IsToolSearchTool() bool {
+	return t.Type == ToolTypeSearchRegex || t.Type == ToolTypeSearchBM25
 }
 
 // SystemPrompt is a union type: either a plain string or []SystemBlock.

@@ -3,6 +3,7 @@ package respconv
 import (
 	"encoding/json/v2"
 
+	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 	"github.com/google/uuid"
 )
@@ -32,6 +33,11 @@ func NewNonStreamingAccumulator(contextWindowSize int, stopSequences []string, m
 // ProcessEvent processes a single event and returns the delta.
 func (n *NonStreamingAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 	return n.acc.ProcessEvent(e)
+}
+
+// SetFilterToolName sets the tool name to filter from accumulator recording.
+func (n *NonStreamingAccumulator) SetFilterToolName(name string) {
+	n.acc.FilterToolName = name
 }
 
 // BuildResponse builds the final Anthropic response from accumulated events.
@@ -70,7 +76,7 @@ func buildResponseFromAcc(acc *responseAccumulator, model string) (map[string]an
 	content := []any{}
 	if acc.ThinkingBuf.Len() > 0 {
 		block := map[string]any{
-			"type":     "thinking",
+			"type":     anthropic.BlockTypeThinking,
 			"thinking": acc.ThinkingBuf.String(),
 		}
 		if acc.Signature != "" {
@@ -80,7 +86,7 @@ func buildResponseFromAcc(acc *responseAccumulator, model string) (map[string]an
 	}
 	if acc.TextBuf.Len() > 0 {
 		content = append(content, map[string]any{
-			"type": "text",
+			"type": anthropic.BlockTypeText,
 			"text": acc.TextBuf.String(),
 		})
 	}
@@ -93,7 +99,7 @@ func buildResponseFromAcc(acc *responseAccumulator, model string) (map[string]an
 			input = map[string]any{}
 		}
 		content = append(content, map[string]any{
-			"type":  "tool_use",
+			"type":  anthropic.BlockTypeToolUse,
 			"id":    tc.ID,
 			"name":  tc.Name,
 			"input": input,

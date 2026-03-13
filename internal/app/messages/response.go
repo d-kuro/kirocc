@@ -82,14 +82,7 @@ func (s *Service) handleStreamingResponse(ctx context.Context, w http.ResponseWr
 
 	if err != nil {
 		slog.ErrorContext(ctx, "stream error", "trace_id", short, "err", err)
-		if sw.Started() && gw.IsPromoted() {
-			sw.WriteError(errTypeStreamError, "stream processing error")
-		} else {
-			if !gw.IsPromoted() {
-				gw.Discard()
-			}
-			WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream stream error")
-		}
+		writeStreamingOrJSONError(gw, sw, w, http.StatusBadGateway, errTypeStreamError, "upstream stream error")
 		return ""
 	}
 

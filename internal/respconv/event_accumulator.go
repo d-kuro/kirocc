@@ -78,6 +78,9 @@ type responseAccumulator struct {
 	thinkingTagInside bool   // currently inside <thinking> tags
 	thinkingTagBuf    string // buffer for partial tag matching across chunk boundaries
 	thinkingTagUsed   bool   // true if <thinking> tags were detected (guards against double-counting with reasoningContentEvent)
+	// FilterToolName, when set, causes ProcessEvent to skip recording tool_use
+	// events with this name in HasToolUse/ToolCalls (used by tool search orchestrator).
+	FilterToolName string
 }
 
 // newAccumulator creates a responseAccumulator with common initialization.
@@ -147,6 +150,14 @@ func (a *responseAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 
 	case kiroproto.EventToolUse:
 		if e.ToolStop && !a.LocalStop {
+			// Skip recording filtered tools (e.g. internal ToolSearch).
+			if a.FilterToolName != "" && e.ToolName == a.FilterToolName {
+				d.ToolStop = true
+				d.ToolUseID = e.ToolUseID
+				d.ToolName = e.ToolName
+				d.ToolInput = e.ToolInput
+				return d
+			}
 			a.HasToolUse = true
 			tc := ToolCall{
 				ID:    e.ToolUseID,
