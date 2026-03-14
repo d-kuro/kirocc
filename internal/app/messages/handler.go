@@ -55,6 +55,8 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	thinkingLog := any(thinking)
 	if effort := req.Effort(); thinking && effort != "" {
 		thinkingLog = effort
+	} else if thinking {
+		thinkingLog = "enabled"
 	}
 	slog.InfoContext(r.Context(), "--> POST /v1/messages",
 		"trace_id", short,
