@@ -86,7 +86,11 @@ func searchRegex(pattern string, tools map[string]anthropic.Tool, maxResults int
 	words := strings.Fields(strings.ToLower(pattern))
 	var wordRe *regexp.Regexp
 	if len(words) > 1 {
-		wordRe, _ = regexp.Compile("(?i)(" + strings.Join(words, "|") + ")")
+		quoted := make([]string, len(words))
+		for i, w := range words {
+			quoted[i] = regexp.QuoteMeta(w)
+		}
+		wordRe, _ = regexp.Compile("(?i)(" + strings.Join(quoted, "|") + ")")
 	}
 
 	var results []scored

@@ -199,7 +199,7 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 		})
 		_ = apiResp.Body.Close()
 
-		if err != nil || hasError {
+		if (err != nil || hasError) && !foundToolSearch {
 			WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream error")
 			return ""
 		}

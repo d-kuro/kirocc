@@ -2,7 +2,7 @@ export GOEXPERIMENT := jsonv2
 
 BIN := dist/kirocc
 
-.PHONY: build install run debug test lint fmt fix clean
+.PHONY: build install run debug test test-e2e lint fmt fix clean
 
 build:
 	go build -o $(BIN) ./cmd/kirocc
@@ -18,6 +18,9 @@ debug:
 
 test:
 	go test -race ./...
+
+test-e2e:
+	go test -tags e2e -race -timeout 120s ./internal/e2e/
 
 lint:
 	golangci-lint run
