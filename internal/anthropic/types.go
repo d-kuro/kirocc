@@ -16,15 +16,18 @@ type Request struct {
 	StopSequences []string        `json:"stop_sequences,omitempty"`
 	Stream        bool            `json:"stream"`
 	Thinking      *ThinkingConfig `json:"thinking,omitempty"`
+	OutputConfig  *OutputConfig   `json:"output_config,omitempty"`
+}
+
+// OutputConfig represents the output_config field in the Anthropic API.
+type OutputConfig struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 // ThinkingConfig represents the thinking configuration in the Anthropic API.
 type ThinkingConfig struct {
 	Type         string `json:"type"`
 	BudgetTokens int    `json:"budget_tokens,omitzero"`
-	// reasoning_effort is sent by Claude Code (e.g. --effort high/low).
-	// Values: "high", "medium", "low" (or empty).
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // Thinking type constants.
@@ -33,15 +36,17 @@ const (
 	ThinkingTypeAdaptive = "adaptive"
 )
 
-// ReasoningEffort constants (sent by Claude Code via --effort flag).
+// Effort level constants (set via output_config.effort).
 const (
-	ReasoningEffortHigh   = "high"
-	ReasoningEffortMedium = "medium"
-	ReasoningEffortLow    = "low"
+	EffortMax    = "max"
+	EffortHigh   = "high"
+	EffortMedium = "medium"
+	EffortLow    = "low"
 )
 
 // Thinking budget tokens per reasoning effort level.
 const (
+	ThinkingBudgetMax    = 160000
 	ThinkingBudgetHigh   = 31999
 	ThinkingBudgetMedium = 10000
 	ThinkingBudgetLow    = 4000
@@ -54,6 +59,15 @@ func (r *Request) IsThinkingEnabled() bool {
 		return false
 	}
 	return r.Thinking.Type == ThinkingTypeEnabled || r.Thinking.Type == ThinkingTypeAdaptive
+}
+
+// Effort returns the effort level from output_config.effort.
+// Returns empty string if unset.
+func (r *Request) Effort() string {
+	if r.OutputConfig != nil {
+		return r.OutputConfig.Effort
+	}
+	return ""
 }
 
 // Message represents a single message in the conversation.

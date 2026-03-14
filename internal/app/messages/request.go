@@ -1,8 +1,12 @@
 package messages
 
 import (
+	"bytes"
+	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -14,7 +18,7 @@ import (
 
 // HandleCountTokens serves POST /v1/messages/count_tokens.
 func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
-	req, err := parseAndValidateRequest(w, r)
+	req, err := parseAndValidateRequest(r.Context(), w, r)
 	if err != nil {
 		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 		return
@@ -57,11 +61,22 @@ func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 // parseAndValidateRequest decodes and validates an Anthropic request from the HTTP body.
-func parseAndValidateRequest(w http.ResponseWriter, r *http.Request) (*anthropic.Request, error) {
-	var req anthropic.Request
+func parseAndValidateRequest(ctx context.Context, w http.ResponseWriter, r *http.Request) (*anthropic.Request, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
-	if err := json.UnmarshalRead(r.Body, &req); err != nil {
-		return nil, fmt.Errorf("invalid request: %w", err)
+	var req anthropic.Request
+	if slog.Default().Enabled(ctx, slog.LevelDebug) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, fmt.Errorf("invalid request: %w", err)
+		}
+		slog.DebugContext(ctx, "client request body", "request_body", jsontext.Value(raw))
+		if err := json.UnmarshalDecode(jsontext.NewDecoder(bytes.NewReader(raw)), &req); err != nil {
+			return nil, fmt.Errorf("invalid request: %w", err)
+		}
+	} else {
+		if err := json.UnmarshalRead(r.Body, &req); err != nil {
+			return nil, fmt.Errorf("invalid request: %w", err)
+		}
 	}
 	if len(req.Messages) == 0 {
 		return nil, fmt.Errorf("messages must not be empty")

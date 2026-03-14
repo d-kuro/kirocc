@@ -20,7 +20,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	traceID := logging.TraceIDFromContext(r.Context())
 	short := logging.ShortTraceID(traceID)
 
-	req, err := parseAndValidateRequest(w, r)
+	req, err := parseAndValidateRequest(r.Context(), w, r)
 	if err != nil {
 		slog.WarnContext(r.Context(), "invalid request",
 			"trace_id", short, "err", err)
@@ -52,9 +52,13 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	if contextWindowSize >= 1_000_000 {
 		contextWindow = fmt.Sprintf("%dM", contextWindowSize/1_000_000)
 	}
-	thinkingLog := any(thinking)
-	if thinking && req.Thinking != nil && req.Thinking.ReasoningEffort != "" {
-		thinkingLog = req.Thinking.ReasoningEffort
+	var thinkingLog any = false
+	if thinking {
+		if effort := req.Effort(); effort != "" {
+			thinkingLog = effort
+		} else {
+			thinkingLog = "enabled"
+		}
 	}
 	slog.InfoContext(r.Context(), "--> POST /v1/messages",
 		"trace_id", short,
@@ -67,14 +71,20 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	thinkingBudget := 0
 	if req.Thinking != nil {
 		thinkingBudget = req.Thinking.BudgetTokens
-		// When budget_tokens is not explicitly set, derive from reasoning_effort.
+		// When budget_tokens is not explicitly set, derive from effort level.
 		if thinkingBudget <= 0 {
-			switch req.Thinking.ReasoningEffort {
-			case anthropic.ReasoningEffortHigh:
+			switch req.Effort() {
+			case anthropic.EffortMax:
+				thinkingBudget = anthropic.ThinkingBudgetMax
+			case anthropic.EffortHigh:
 				thinkingBudget = anthropic.ThinkingBudgetHigh
-			case anthropic.ReasoningEffortLow:
+			case anthropic.EffortLow:
 				thinkingBudget = anthropic.ThinkingBudgetLow
 			default: // "medium" or unset
+				if e := req.Effort(); e != "" && e != anthropic.EffortMedium {
+					slog.WarnContext(r.Context(), "unknown effort level, falling back to medium",
+						"trace_id", short, "effort", e)
+				}
 				thinkingBudget = anthropic.ThinkingBudgetMedium
 			}
 		}

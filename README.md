@@ -11,7 +11,7 @@ Just set `ANTHROPIC_BASE_URL` from any Anthropic API client (e.g., Claude Code) 
 - **Response conversion** — Converts Kiro event streams back to Anthropic SSE format
 - **Automatic auth management** — Reads credentials from Kiro CLI's SQLite DB with automatic token refresh (Social / OIDC)
 - **Model mapping** — Maps Anthropic model names (e.g., `claude-sonnet-4-6`) to Kiro model names. Customizable via environment variable
-- **Extended Thinking** — Supports `[1m]` suffix, `thinking` field, and `reasoning_effort` / `budget_tokens` for extended thinking mode
+- **Extended Thinking** — Supports `[1m]` suffix, `thinking` field, `output_config.effort`, and `budget_tokens` for extended thinking mode
 - **Tool Search** — Proxy-side implementation of Anthropic's [Tool Search Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool). Supports `tool_search_tool_regex_20251119` and `tool_search_tool_bm25_20251119` with `defer_loading` for on-demand tool discovery
 - **Prompt Caching** — Converts Anthropic tool-level `cache_control` to Kiro `cachePoint`
 - **Truncation detection** — Automatically injects a notice into the next request when a response is truncated
@@ -197,7 +197,7 @@ Thinking is enabled by any of:
 The thinking budget is determined by:
 
 1. `thinking.budget_tokens` if explicitly set
-2. Derived from `thinking.reasoning_effort`: `high` = 31999, `medium` = 10000, `low` = 4000
+2. Derived from `output_config.effort`: `max` = 160000, `high` = 31999, `medium` = 10000, `low` = 4000
 3. Default: 10000 (medium)
 
 ### Tool Search
