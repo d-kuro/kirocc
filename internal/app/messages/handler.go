@@ -81,6 +81,10 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 			case anthropic.EffortLow:
 				thinkingBudget = anthropic.ThinkingBudgetLow
 			default: // "medium" or unset
+				if e := req.Effort(); e != "" && e != anthropic.EffortMedium {
+					slog.WarnContext(r.Context(), "unknown effort level, falling back to medium",
+						"trace_id", short, "effort", e)
+				}
 				thinkingBudget = anthropic.ThinkingBudgetMedium
 			}
 		}
