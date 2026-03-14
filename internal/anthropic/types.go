@@ -28,9 +28,6 @@ type OutputConfig struct {
 type ThinkingConfig struct {
 	Type         string `json:"type"`
 	BudgetTokens int    `json:"budget_tokens,omitzero"`
-	// reasoning_effort is sent by Claude Code (e.g. --effort high/low).
-	// Values: "high", "medium", "low" (or empty).
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // Thinking type constants.
@@ -39,12 +36,12 @@ const (
 	ThinkingTypeAdaptive = "adaptive"
 )
 
-// ReasoningEffort constants (sent by Claude Code via --effort flag).
+// Effort level constants (set via output_config.effort).
 const (
-	ReasoningEffortMax    = "max"
-	ReasoningEffortHigh   = "high"
-	ReasoningEffortMedium = "medium"
-	ReasoningEffortLow    = "low"
+	EffortMax    = "max"
+	EffortHigh   = "high"
+	EffortMedium = "medium"
+	EffortLow    = "low"
 )
 
 // Thinking budget tokens per reasoning effort level.
@@ -64,14 +61,11 @@ func (r *Request) IsThinkingEnabled() bool {
 	return r.Thinking.Type == ThinkingTypeEnabled || r.Thinking.Type == ThinkingTypeAdaptive
 }
 
-// Effort returns the reasoning effort level from either output_config.effort
-// or thinking.reasoning_effort (legacy). Returns empty string if unset.
+// Effort returns the effort level from output_config.effort.
+// Returns empty string if unset.
 func (r *Request) Effort() string {
-	if r.OutputConfig != nil && r.OutputConfig.Effort != "" {
+	if r.OutputConfig != nil {
 		return r.OutputConfig.Effort
-	}
-	if r.Thinking != nil {
-		return r.Thinking.ReasoningEffort
 	}
 	return ""
 }

@@ -72,11 +72,11 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		// When budget_tokens is not explicitly set, derive from effort level.
 		if thinkingBudget <= 0 {
 			switch req.Effort() {
-			case anthropic.ReasoningEffortMax:
+			case anthropic.EffortMax:
 				thinkingBudget = anthropic.ThinkingBudgetMax
-			case anthropic.ReasoningEffortHigh:
+			case anthropic.EffortHigh:
 				thinkingBudget = anthropic.ThinkingBudgetHigh
-			case anthropic.ReasoningEffortLow:
+			case anthropic.EffortLow:
 				thinkingBudget = anthropic.ThinkingBudgetLow
 			default: // "medium" or unset
 				thinkingBudget = anthropic.ThinkingBudgetMedium

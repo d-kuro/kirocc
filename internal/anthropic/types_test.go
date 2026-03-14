@@ -241,33 +241,22 @@ func TestRequest_Effort(t *testing.T) {
 		want string
 	}{
 		{
-			name: "output_config.effort takes priority",
-			req: Request{
-				OutputConfig: &OutputConfig{Effort: "max"},
-				Thinking:     &ThinkingConfig{ReasoningEffort: "high"},
-			},
+			name: "output_config.effort set",
+			req:  Request{OutputConfig: &OutputConfig{Effort: "max"}},
 			want: "max",
 		},
 		{
-			name: "falls back to thinking.reasoning_effort",
-			req:  Request{Thinking: &ThinkingConfig{ReasoningEffort: "high"}},
-			want: "high",
+			name: "output_config without effort returns empty",
+			req:  Request{OutputConfig: &OutputConfig{}},
+			want: "",
 		},
 		{
-			name: "output_config without effort falls back to thinking",
-			req: Request{
-				OutputConfig: &OutputConfig{},
-				Thinking:     &ThinkingConfig{ReasoningEffort: "low"},
-			},
-			want: "low",
-		},
-		{
-			name: "both nil returns empty",
+			name: "nil output_config returns empty",
 			req:  Request{},
 			want: "",
 		},
 		{
-			name: "thinking without reasoning_effort returns empty",
+			name: "thinking present but no output_config returns empty",
 			req:  Request{Thinking: &ThinkingConfig{Type: "enabled"}},
 			want: "",
 		},
