@@ -52,11 +52,13 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	if contextWindowSize >= 1_000_000 {
 		contextWindow = fmt.Sprintf("%dM", contextWindowSize/1_000_000)
 	}
-	thinkingLog := any(thinking)
-	if effort := req.Effort(); thinking && effort != "" {
-		thinkingLog = effort
-	} else if thinking {
-		thinkingLog = "enabled"
+	var thinkingLog any = false
+	if thinking {
+		if effort := req.Effort(); effort != "" {
+			thinkingLog = effort
+		} else {
+			thinkingLog = "enabled"
+		}
 	}
 	slog.InfoContext(r.Context(), "--> POST /v1/messages",
 		"trace_id", short,
