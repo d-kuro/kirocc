@@ -13,6 +13,7 @@ import (
 	"github.com/d-kuro/kirocc/internal/logging"
 	"github.com/d-kuro/kirocc/internal/models"
 	"github.com/d-kuro/kirocc/internal/reqconv"
+	"github.com/d-kuro/kirocc/internal/toolsearch"
 )
 
 func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +78,57 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 				thinkingBudget = anthropic.ThinkingBudgetMedium
 			}
 		}
+	}
+
+	// Check for tool search tools and delegate to orchestrator if found.
+	tsCtx := toolsearch.NewContext(req.Tools)
+	if tsCtx != nil {
+		// Promote deferred tools referenced in conversation history.
+		refs := reqconv.ExtractToolReferences(req.Messages)
+		tsCtx.PromoteTools(refs)
+
+		slog.InfoContext(r.Context(), "tool search enabled",
+			"trace_id", short,
+			"search_type", tsCtx.SearchType,
+			"deferred_tools", len(tsCtx.DeferredTools),
+			"active_tools", len(tsCtx.ActiveTools),
+		)
+
+		orch := &toolSearchOrchestrator{
+			service: s,
+			tsCtx:   tsCtx,
+			req:     req,
+			creds:   creds,
+			buildOpts: reqconv.BuildOptions{
+				ProfileARN:     creds.ProfileARN,
+				ModelID:        kiroModel,
+				Thinking:       thinking,
+				ThinkingBudget: thinkingBudget,
+				EnvState:       s.envState,
+				ToolSearchCtx:  tsCtx,
+			},
+			contextWindowSize: contextWindowSize,
+		}
+		var retryReason string
+		if req.Stream {
+			retryReason = orch.handleStreaming(r.Context(), w)
+		} else {
+			retryReason = orch.handleNonStreaming(r.Context(), w)
+		}
+		if retryReason == retryReasonEmptyVisibleEndTurn {
+			slog.WarnContext(r.Context(), "retrying tool search after empty visible end_turn", "trace_id", short)
+			var reason string
+			if req.Stream {
+				reason = orch.handleStreaming(r.Context(), w)
+			} else {
+				reason = orch.handleNonStreaming(r.Context(), w)
+			}
+			if reason == retryReasonEmptyVisibleEndTurn {
+				slog.ErrorContext(r.Context(), "tool search retry also returned empty visible end_turn", "trace_id", short)
+				WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream returned empty response")
+			}
+		}
+		return
 	}
 
 	payload, err := reqconv.BuildPayload(req, reqconv.BuildOptions{ProfileARN: creds.ProfileARN, ModelID: kiroModel, Thinking: thinking, ThinkingBudget: thinkingBudget, EnvState: s.envState})

@@ -43,14 +43,14 @@ func step1aTextualizeAllToolContent(msgs []anthropic.Message) []anthropic.Messag
 		var newBlocks []anthropic.ContentBlock
 		for _, b := range msg.Content.Blocks {
 			switch b.Type {
-			case "tool_use":
+			case anthropic.BlockTypeToolUse, anthropic.BlockTypeServerToolUse:
 				inputJSON, _ := json.Marshal(b.Input)
 				text := fmt.Sprintf("[Tool: %s (%s)]\n%s", b.Name, b.ID, string(inputJSON))
-				newBlocks = append(newBlocks, anthropic.ContentBlock{Type: "text", Text: text})
-			case "tool_result":
+				newBlocks = append(newBlocks, anthropic.ContentBlock{Type: anthropic.BlockTypeText, Text: text})
+			case anthropic.BlockTypeToolResult, anthropic.BlockTypeToolSearchToolResult:
 				content := extractToolResultContentText(b)
 				text := fmt.Sprintf("[Tool Result (%s)]\n%s", b.ToolUseID, content)
-				newBlocks = append(newBlocks, anthropic.ContentBlock{Type: "text", Text: text})
+				newBlocks = append(newBlocks, anthropic.ContentBlock{Type: anthropic.BlockTypeText, Text: text})
 			default:
 				newBlocks = append(newBlocks, b)
 			}
@@ -76,7 +76,7 @@ func step1bTextualizeOrphanToolResults(msgs []anthropic.Message) []anthropic.Mes
 		assistantToolIDs := make(map[string]struct{})
 		if i > 0 && msgs[i-1].Role == "assistant" && !msgs[i-1].Content.IsString() {
 			for _, b := range msgs[i-1].Content.Blocks {
-				if b.Type == "tool_use" {
+				if b.IsToolUse() {
 					assistantToolIDs[b.ID] = struct{}{}
 				}
 			}
@@ -84,11 +84,11 @@ func step1bTextualizeOrphanToolResults(msgs []anthropic.Message) []anthropic.Mes
 
 		var newBlocks []anthropic.ContentBlock
 		for _, b := range msg.Content.Blocks {
-			if b.Type == "tool_result" {
+			if b.IsToolResult() {
 				if _, ok := assistantToolIDs[b.ToolUseID]; !ok {
 					content := extractToolResultContentText(b)
 					text := fmt.Sprintf("[Tool Result (%s)]\n%s", b.ToolUseID, content)
-					newBlocks = append(newBlocks, anthropic.ContentBlock{Type: "text", Text: text})
+					newBlocks = append(newBlocks, anthropic.ContentBlock{Type: anthropic.BlockTypeText, Text: text})
 					continue
 				}
 			}
@@ -109,8 +109,16 @@ func extractToolResultContentText(b anthropic.ContentBlock) string {
 	}
 	var parts []string
 	for _, cb := range b.Content.Blocks {
-		if cb.Type == "text" {
+		switch {
+		case cb.Type == anthropic.BlockTypeText:
 			parts = append(parts, cb.Text)
+		case cb.Type == anthropic.BlockTypeToolSearchSearchResult || len(cb.ToolReferences) > 0:
+			// Preserve tool_references from tool_search_tool_result content.
+			for _, ref := range cb.ToolReferences {
+				if ref.ToolName != "" {
+					parts = append(parts, "tool_reference: "+ref.ToolName)
+				}
+			}
 		}
 	}
 	return strings.Join(parts, "\n")
@@ -141,7 +149,7 @@ func isPlainTextContent(content anthropic.MessageContent) bool {
 		return true
 	}
 	for _, b := range content.Blocks {
-		if b.Type != "text" {
+		if b.Type != anthropic.BlockTypeText {
 			return false
 		}
 	}

@@ -16,7 +16,7 @@ func ExtractToolResults(content anthropic.MessageContent) []kiroproto.ToolResult
 	}
 	var results []kiroproto.ToolResult
 	for _, b := range content.Blocks {
-		if b.Type != "tool_result" {
+		if !b.IsToolResult() {
 			continue
 		}
 		status := kiroproto.ToolResultStatusSuccess
@@ -52,7 +52,7 @@ func ExtractToolUses(content anthropic.MessageContent) []kiroproto.HistoryToolUs
 	}
 	var toolUses []kiroproto.HistoryToolUse
 	for _, b := range content.Blocks {
-		if b.Type != "tool_use" {
+		if !b.IsToolUse() {
 			continue
 		}
 		toolUses = append(toolUses, kiroproto.HistoryToolUse{
@@ -73,7 +73,7 @@ func ExtractThinkingToolUses(content anthropic.MessageContent) []kiroproto.Histo
 	}
 	var toolUses []kiroproto.HistoryToolUse
 	for _, b := range content.Blocks {
-		if b.Type != "thinking" || b.Thinking == "" {
+		if b.Type != anthropic.BlockTypeThinking || b.Thinking == "" {
 			continue
 		}
 		id := "thinking_" + uuid.New().String()[:8]
@@ -120,7 +120,7 @@ func ExtractImages(content anthropic.MessageContent) []kiroproto.Image {
 	}
 	var images []kiroproto.Image
 	for _, b := range content.Blocks {
-		if b.Type != "image" || b.Source == nil {
+		if b.Type != anthropic.BlockTypeImage || b.Source == nil {
 			continue
 		}
 		if b.Source.Type != "base64" {

@@ -233,3 +233,75 @@ func TestTool_CacheControl(t *testing.T) {
 		t.Fatal("expected cache_control on tool")
 	}
 }
+
+func TestContentBlock_IsToolUse(t *testing.T) {
+	tests := []struct {
+		typ  string
+		want bool
+	}{
+		{BlockTypeToolUse, true},
+		{BlockTypeServerToolUse, true},
+		{"text", false},
+		{"tool_result", false},
+	}
+	for _, tt := range tests {
+		b := ContentBlock{Type: tt.typ}
+		if got := b.IsToolUse(); got != tt.want {
+			t.Fatalf("IsToolUse(%q) = %v, want %v", tt.typ, got, tt.want)
+		}
+	}
+}
+
+func TestContentBlock_IsToolResult(t *testing.T) {
+	tests := []struct {
+		typ  string
+		want bool
+	}{
+		{BlockTypeToolResult, true},
+		{BlockTypeToolSearchToolResult, true},
+		{"text", false},
+		{"tool_use", false},
+	}
+	for _, tt := range tests {
+		b := ContentBlock{Type: tt.typ}
+		if got := b.IsToolResult(); got != tt.want {
+			t.Fatalf("IsToolResult(%q) = %v, want %v", tt.typ, got, tt.want)
+		}
+	}
+}
+
+func TestTool_IsToolSearchTool(t *testing.T) {
+	tests := []struct {
+		typ  string
+		want bool
+	}{
+		{ToolTypeSearchRegex, true},
+		{ToolTypeSearchBM25, true},
+		{"", false},
+		{"custom", false},
+	}
+	for _, tt := range tests {
+		tool := Tool{Type: tt.typ}
+		if got := tool.IsToolSearchTool(); got != tt.want {
+			t.Fatalf("IsToolSearchTool(%q) = %v, want %v", tt.typ, got, tt.want)
+		}
+	}
+}
+
+func TestMessageContent_UnmarshalJSON_Object(t *testing.T) {
+	raw := `{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"Read"}]}`
+	var mc MessageContent
+	if err := json.Unmarshal([]byte(raw), &mc); err != nil {
+		t.Fatal(err)
+	}
+	if len(mc.Blocks) != 1 {
+		t.Fatalf("got %d blocks, want 1", len(mc.Blocks))
+	}
+	b := mc.Blocks[0]
+	if b.Type != BlockTypeToolSearchSearchResult {
+		t.Fatalf("type = %q, want %q", b.Type, BlockTypeToolSearchSearchResult)
+	}
+	if len(b.ToolReferences) != 1 || b.ToolReferences[0].ToolName != "Read" {
+		t.Fatalf("tool_references = %+v", b.ToolReferences)
+	}
+}

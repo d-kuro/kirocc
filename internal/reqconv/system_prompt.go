@@ -17,7 +17,7 @@ func ExtractSystemPrompt(system anthropic.SystemPrompt) string {
 	}
 	var parts []string
 	for _, block := range system.Blocks {
-		if block.Type == "text" && block.Text != "" {
+		if block.Type == anthropic.BlockTypeText && block.Text != "" {
 			parts = append(parts, block.Text)
 		}
 	}

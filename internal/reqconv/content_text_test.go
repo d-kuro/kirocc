@@ -57,6 +57,26 @@ func TestExtractTextContent(t *testing.T) {
 			want: "",
 		},
 		{
+			name: "ignores_server_tool_use",
+			content: anthropic.MessageContent{
+				Blocks: []anthropic.ContentBlock{
+					{Type: anthropic.BlockTypeServerToolUse, ID: "stu_01", Name: "web_search"},
+					{Type: "text", Text: "Result"},
+				},
+			},
+			want: "Result",
+		},
+		{
+			name: "ignores_tool_search_tool_result",
+			content: anthropic.MessageContent{
+				Blocks: []anthropic.ContentBlock{
+					{Type: anthropic.BlockTypeToolSearchToolResult, ToolUseID: "ts_01"},
+					{Type: "text", Text: "Done"},
+				},
+			},
+			want: "Done",
+		},
+		{
 			name: "unknown_block_no_identifier",
 			content: anthropic.MessageContent{
 				Blocks: []anthropic.ContentBlock{

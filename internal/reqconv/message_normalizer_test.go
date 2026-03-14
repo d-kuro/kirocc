@@ -1,6 +1,7 @@
 package reqconv
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/d-kuro/kirocc/internal/anthropic"
@@ -196,6 +197,42 @@ func TestStep4NormalizeRoles_DoesNotMutateInput(t *testing.T) {
 	step4NormalizeRoles(msgs)
 	if msgs[0].Role != original {
 		t.Fatalf("input mutated: role changed from %q to %q", original, msgs[0].Role)
+	}
+}
+
+func TestExtractToolResultContentText_ToolSearchResult(t *testing.T) {
+	// Use step1aTextualizeAllToolContent to exercise extractToolResultContentText indirectly.
+	msgs := []anthropic.Message{
+		{
+			Role: "user",
+			Content: anthropic.MessageContent{
+				Blocks: []anthropic.ContentBlock{
+					{
+						Type:      anthropic.BlockTypeToolSearchToolResult,
+						ToolUseID: "toolu_ts",
+						Content: anthropic.MessageContent{
+							Blocks: []anthropic.ContentBlock{
+								{
+									Type: anthropic.BlockTypeToolSearchSearchResult,
+									ToolReferences: []anthropic.ContentBlock{
+										{Type: anthropic.BlockTypeToolReference, ToolName: "Read"},
+										{Type: anthropic.BlockTypeToolReference, ToolName: "Edit"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	got := step1aTextualizeAllToolContent(msgs)
+	text := got[0].Content.Blocks[0].Text
+	if !strings.Contains(text, "tool_reference: Read") {
+		t.Fatalf("expected 'tool_reference: Read' in %q", text)
+	}
+	if !strings.Contains(text, "tool_reference: Edit") {
+		t.Fatalf("expected 'tool_reference: Edit' in %q", text)
 	}
 }
 

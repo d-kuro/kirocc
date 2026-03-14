@@ -7,6 +7,7 @@ import (
 
 	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
+	"github.com/d-kuro/kirocc/internal/toolsearch"
 	"github.com/google/uuid"
 )
 
@@ -21,18 +22,23 @@ type BuildOptions struct {
 	Thinking       bool
 	ThinkingBudget int
 	EnvState       *kiroproto.EnvState
+	ToolSearchCtx  *toolsearch.Context
 }
 
 // BuildPayload converts an Anthropic request into a Kiro API payload.
 func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payload, error) {
 	// 1. Build system prompt and convert tools.
-	systemPrompt, toolEntries, err := buildSystemAndTools(req)
+	systemPrompt, toolEntries, err := buildSystemAndTools(req, options.ToolSearchCtx)
 	if err != nil {
 		return nil, err
 	}
 
 	// 2. Normalize and split messages.
-	msgs := Normalize(req.Messages, len(req.Tools) > 0)
+	hasTools := len(req.Tools) > 0
+	if options.ToolSearchCtx != nil {
+		hasTools = true
+	}
+	msgs := Normalize(req.Messages, hasTools)
 	historyMsgs, lastMsg := splitMessages(msgs)
 
 	// 3. Build history and place system prompt.
@@ -77,11 +83,20 @@ func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payl
 }
 
 // buildSystemAndTools extracts the system prompt and converts tools.
-func buildSystemAndTools(req *anthropic.Request) (string, []kiroproto.ToolEntry, error) {
+func buildSystemAndTools(req *anthropic.Request, tsCtx *toolsearch.Context) (string, []kiroproto.ToolEntry, error) {
 	systemPrompt := ExtractSystemPrompt(req.System)
 
 	var toolEntries []kiroproto.ToolEntry
-	if len(req.Tools) > 0 {
+	if tsCtx != nil {
+		// Tool search mode: convert only active tools, inject ToolSearch tool.
+		var err error
+		toolEntries, err = ConvertTools(tsCtx.ActiveTools)
+		if err != nil {
+			return "", nil, err
+		}
+		toolEntries = ApplyToolCachePoints(tsCtx.ActiveTools, toolEntries)
+		toolEntries = append(toolEntries, toolsearch.KiroToolSearchEntry())
+	} else if len(req.Tools) > 0 {
 		var err error
 		toolEntries, err = ConvertTools(req.Tools)
 		if err != nil {
@@ -226,7 +241,7 @@ func extractToolUseIDs(msg anthropic.Message) []string {
 	}
 	var ids []string
 	for _, b := range msg.Content.Blocks {
-		if b.Type == "tool_use" {
+		if b.IsToolUse() {
 			ids = append(ids, b.ID)
 		}
 	}
