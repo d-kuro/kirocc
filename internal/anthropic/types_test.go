@@ -234,6 +234,74 @@ func TestTool_CacheControl(t *testing.T) {
 	}
 }
 
+func TestRequest_Effort(t *testing.T) {
+	tests := []struct {
+		name string
+		req  Request
+		want string
+	}{
+		{
+			name: "output_config.effort takes priority",
+			req: Request{
+				OutputConfig: &OutputConfig{Effort: "max"},
+				Thinking:     &ThinkingConfig{ReasoningEffort: "high"},
+			},
+			want: "max",
+		},
+		{
+			name: "falls back to thinking.reasoning_effort",
+			req:  Request{Thinking: &ThinkingConfig{ReasoningEffort: "high"}},
+			want: "high",
+		},
+		{
+			name: "output_config without effort falls back to thinking",
+			req: Request{
+				OutputConfig: &OutputConfig{},
+				Thinking:     &ThinkingConfig{ReasoningEffort: "low"},
+			},
+			want: "low",
+		},
+		{
+			name: "both nil returns empty",
+			req:  Request{},
+			want: "",
+		},
+		{
+			name: "thinking without reasoning_effort returns empty",
+			req:  Request{Thinking: &ThinkingConfig{Type: "enabled"}},
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.req.Effort(); got != tt.want {
+				t.Fatalf("Effort() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRequest_UnmarshalJSON_OutputConfig(t *testing.T) {
+	raw := `{
+		"model": "claude-opus-4-6",
+		"max_tokens": 32000,
+		"stream": true,
+		"messages": [{"role": "user", "content": "hi"}],
+		"thinking": {"type": "adaptive"},
+		"output_config": {"effort": "max"}
+	}`
+	var req Request
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.OutputConfig == nil || req.OutputConfig.Effort != "max" {
+		t.Fatalf("output_config = %+v, want effort=max", req.OutputConfig)
+	}
+	if req.Effort() != "max" {
+		t.Fatalf("Effort() = %q, want %q", req.Effort(), "max")
+	}
+}
+
 func TestContentBlock_IsToolUse(t *testing.T) {
 	tests := []struct {
 		typ  string
