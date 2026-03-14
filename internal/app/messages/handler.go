@@ -20,7 +20,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	traceID := logging.TraceIDFromContext(r.Context())
 	short := logging.ShortTraceID(traceID)
 
-	req, err := parseAndValidateRequest(w, r)
+	req, err := parseAndValidateRequest(r.Context(), w, r)
 	if err != nil {
 		slog.WarnContext(r.Context(), "invalid request",
 			"trace_id", short, "err", err)
@@ -53,8 +53,8 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		contextWindow = fmt.Sprintf("%dM", contextWindowSize/1_000_000)
 	}
 	thinkingLog := any(thinking)
-	if thinking && req.Thinking != nil && req.Thinking.ReasoningEffort != "" {
-		thinkingLog = req.Thinking.ReasoningEffort
+	if effort := req.Effort(); thinking && effort != "" {
+		thinkingLog = effort
 	}
 	slog.InfoContext(r.Context(), "--> POST /v1/messages",
 		"trace_id", short,
@@ -67,9 +67,11 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	thinkingBudget := 0
 	if req.Thinking != nil {
 		thinkingBudget = req.Thinking.BudgetTokens
-		// When budget_tokens is not explicitly set, derive from reasoning_effort.
+		// When budget_tokens is not explicitly set, derive from effort level.
 		if thinkingBudget <= 0 {
-			switch req.Thinking.ReasoningEffort {
+			switch req.Effort() {
+			case anthropic.ReasoningEffortMax:
+				thinkingBudget = anthropic.ThinkingBudgetMax
 			case anthropic.ReasoningEffortHigh:
 				thinkingBudget = anthropic.ThinkingBudgetHigh
 			case anthropic.ReasoningEffortLow:
