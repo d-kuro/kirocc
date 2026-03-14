@@ -159,23 +159,26 @@ Tell the user: "Tag pushed. The GitHub Actions Release workflow will automatical
 
 Provide a link to monitor: `https://github.com/d-kuro/kirocc/actions/workflows/release.yml`
 
-#### Step 8 — Wait for release and sync notes
+#### Step 8 — Monitor workflow and sync notes
 
-The user should wait for the GoReleaser workflow to complete. Check status:
+After pushing the tag, use `CronCreate` to poll the release workflow every 2 minutes until it completes:
 
-```bash
-gh run list --workflow=release.yml --limit 1
+```
+CronCreate(
+  cron: "*/2 * * * *",
+  recurring: true,
+  prompt: "Check the kirocc release workflow status by running: gh run list --workflow=release.yml --limit 1 --json status,conclusion,databaseId. If the latest run's status is 'completed', delete this cron job with CronDelete, then: if conclusion is 'success', proceed to sync release notes and verify (Step 9). If conclusion is 'failure', report the failure to the user with a link to the run."
+)
 ```
 
-Once complete, sync the release notes:
+Tell the user: "Monitoring the release workflow. I'll notify you when it completes."
+
+#### Step 9 — Sync notes and verify
+
+Once the workflow succeeds, sync the release notes and verify:
 
 ```bash
 gh release edit <version> --notes-file docs/release-notes/<version>.md
-```
-
-#### Step 9 — Verify
-
-```bash
 gh release view <version>
 ```
 
