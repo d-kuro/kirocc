@@ -1,6 +1,6 @@
 //go:build e2e
 
-package server
+package e2e
 
 import (
 	"bufio"
@@ -13,36 +13,37 @@ import (
 	"github.com/d-kuro/kirocc/internal/auth"
 	"github.com/d-kuro/kirocc/internal/config"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
+	"github.com/d-kuro/kirocc/internal/server"
+	"github.com/d-kuro/kirocc/internal/testutil"
 	"github.com/d-kuro/kirocc/internal/tokencount"
 )
 
-// newRealServer creates a test server backed by real Kiro credentials and API client.
-func newRealServer(t *testing.T) *testServer {
+func newRealServer(t *testing.T) string {
 	t.Helper()
-
-	dbPath := config.DefaultDBPath()
-	authMgr := auth.NewAuthManager(dbPath)
-	client := kiroclient.NewHTTPClient(
-		kiroclient.WithTokenCounter(tokencount.CountBytes),
-	)
-	srv := New(authMgr, "", client)
-	ts := newTCP4TestServer(t, srv.Handler())
-	return &testServer{Server: ts, URL: ts.URL}
+	authMgr := auth.NewAuthManager(config.DefaultDBPath())
+	client := kiroclient.NewHTTPClient(kiroclient.WithTokenCounter(tokencount.CountBytes))
+	srv := server.New(authMgr, "", client)
+	ts := testutil.NewTCP4TestServer(t, srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts.URL
 }
 
-type testServer struct {
-	Server interface{ Close() }
-	URL    string
+func postMessages(t *testing.T, baseURL, body string) *http.Response {
+	t.Helper()
+	resp, err := http.Post(baseURL+"/v1/messages", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
 }
 
-// toolSearchBody returns a request body with tool search tool and deferred tools.
-func toolSearchBody(toolType, toolName, model string, stream bool) string {
+func toolSearchBody(toolType, toolName string, stream bool) string {
 	streamStr := "false"
 	if stream {
 		streamStr = "true"
 	}
 	return `{
-		"model": "` + model + `",
+		"model": "claude-sonnet-4-6",
 		"max_tokens": 1024,
 		"stream": ` + streamStr + `,
 		"messages": [{"role": "user", "content": "Read the file at /tmp/test.txt"}],
@@ -56,11 +57,8 @@ func toolSearchBody(toolType, toolName, model string, stream bool) string {
 }
 
 func TestE2E_ToolSearch_Regex_Streaming(t *testing.T) {
-	ts := newRealServer(t)
-	defer ts.Server.Close()
-
-	body := toolSearchBody("tool_search_tool_regex_20251119", "tool_search_tool_regex", "claude-sonnet-4-6", true)
-	resp := postMessages(t, ts.URL, body)
+	url := newRealServer(t)
+	resp := postMessages(t, url, toolSearchBody("tool_search_tool_regex_20251119", "tool_search_tool_regex", true))
 	defer resp.Body.Close()
 	requireStatus(t, resp, 200)
 
@@ -72,9 +70,7 @@ func TestE2E_ToolSearch_Regex_Streaming(t *testing.T) {
 }
 
 func TestE2E_ToolSearch_BM25_Streaming(t *testing.T) {
-	ts := newRealServer(t)
-	defer ts.Server.Close()
-
+	url := newRealServer(t)
 	body := `{
 		"model": "claude-sonnet-4-6",
 		"max_tokens": 1024,
@@ -86,7 +82,7 @@ func TestE2E_ToolSearch_BM25_Streaming(t *testing.T) {
 			{"name": "Bash", "description": "Execute a bash command and return output", "input_schema": {"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}, "defer_loading": true}
 		]
 	}`
-	resp := postMessages(t, ts.URL, body)
+	resp := postMessages(t, url, body)
 	defer resp.Body.Close()
 	requireStatus(t, resp, 200)
 
@@ -97,11 +93,8 @@ func TestE2E_ToolSearch_BM25_Streaming(t *testing.T) {
 }
 
 func TestE2E_ToolSearch_NonStreaming(t *testing.T) {
-	ts := newRealServer(t)
-	defer ts.Server.Close()
-
-	body := toolSearchBody("tool_search_tool_regex_20251119", "tool_search_tool_regex", "claude-sonnet-4-6", false)
-	resp := postMessages(t, ts.URL, body)
+	url := newRealServer(t)
+	resp := postMessages(t, url, toolSearchBody("tool_search_tool_regex_20251119", "tool_search_tool_regex", false))
 	defer resp.Body.Close()
 	requireStatus(t, resp, 200)
 
@@ -132,31 +125,28 @@ func TestE2E_ToolSearch_NonStreaming(t *testing.T) {
 	}
 
 	if !hasServerToolUse {
-		t.Error("missing server_tool_use block in content")
+		t.Error("missing server_tool_use block")
 	}
 	if !hasToolSearchResult {
-		t.Error("missing tool_search_tool_result block in content")
+		t.Error("missing tool_search_tool_result block")
 	}
 	if !hasToolUse {
-		t.Error("missing tool_use block in content")
+		t.Error("missing tool_use block")
 	}
-
 	if sr, _ := result["stop_reason"].(string); sr != "tool_use" {
 		t.Errorf("stop_reason = %q, want %q", sr, "tool_use")
 	}
 }
 
 func TestE2E_ToolSearch_NoSearchTool_Passthrough(t *testing.T) {
-	ts := newRealServer(t)
-	defer ts.Server.Close()
-
+	url := newRealServer(t)
 	body := `{
 		"model": "claude-sonnet-4-6",
 		"max_tokens": 256,
 		"stream": true,
 		"messages": [{"role": "user", "content": "Say hello in one word"}]
 	}`
-	resp := postMessages(t, ts.URL, body)
+	resp := postMessages(t, url, body)
 	defer resp.Body.Close()
 	requireStatus(t, resp, 200)
 
@@ -164,7 +154,6 @@ func TestE2E_ToolSearch_NoSearchTool_Passthrough(t *testing.T) {
 	requireSSEContains(t, events, "message_start")
 	requireSSEContains(t, events, "message_stop")
 
-	// Must NOT contain tool search events.
 	for _, e := range events {
 		if strings.Contains(e.data, "server_tool_use") {
 			t.Error("unexpected server_tool_use in non-tool-search response")
@@ -186,19 +175,18 @@ func readSSEEvents(t *testing.T, r io.Reader) []sseEvent {
 	t.Helper()
 	var events []sseEvent
 	scanner := bufio.NewScanner(r)
-	var currentEvent, currentData string
+	var curEvent, curData string
 	for scanner.Scan() {
 		line := scanner.Text()
 		switch {
 		case strings.HasPrefix(line, "event: "):
-			currentEvent = strings.TrimPrefix(line, "event: ")
+			curEvent = strings.TrimPrefix(line, "event: ")
 		case strings.HasPrefix(line, "data: "):
-			currentData = strings.TrimPrefix(line, "data: ")
+			curData = strings.TrimPrefix(line, "data: ")
 		case line == "":
-			if currentEvent != "" || currentData != "" {
-				events = append(events, sseEvent{event: currentEvent, data: currentData})
-				currentEvent = ""
-				currentData = ""
+			if curEvent != "" || curData != "" {
+				events = append(events, sseEvent{event: curEvent, data: curData})
+				curEvent, curData = "", ""
 			}
 		}
 	}
@@ -206,6 +194,14 @@ func readSSEEvents(t *testing.T, r io.Reader) []sseEvent {
 		t.Fatal("no SSE events received")
 	}
 	return events
+}
+
+func requireStatus(t *testing.T, resp *http.Response, want int) {
+	t.Helper()
+	if resp.StatusCode != want {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want %d, body = %s", resp.StatusCode, want, body)
+	}
 }
 
 func requireSSEContains(t *testing.T, events []sseEvent, blockType string) {
@@ -231,7 +227,6 @@ func requireSSEEventField(t *testing.T, events []sseEvent, eventType, field, wan
 		if v, _ := m[field].(string); v == want {
 			return
 		}
-		// Check nested: e.g. message_delta has usage in delta
 		if delta, ok := m["delta"].(map[string]any); ok {
 			if v, _ := delta[field].(string); v == want {
 				return
@@ -239,13 +234,4 @@ func requireSSEEventField(t *testing.T, events []sseEvent, eventType, field, wan
 		}
 	}
 	t.Errorf("SSE event %q missing %s=%q", eventType, field, want)
-}
-
-func postMessagesWithClient(t *testing.T, url, body string) *http.Response {
-	t.Helper()
-	resp, err := http.Post(url+"/v1/messages", "application/json", strings.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return resp
 }
