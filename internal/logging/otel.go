@@ -15,20 +15,22 @@ import (
 type otelHandler struct {
 	w     io.Writer
 	mu    *sync.Mutex
+	level slog.Level
 	attrs []slog.Attr
 	group string
 }
 
 // NewOTelHandler creates an OTel-style JSON Lines slog handler.
-func NewOTelHandler(w io.Writer) slog.Handler {
+func NewOTelHandler(w io.Writer, level slog.Level) slog.Handler {
 	return &otelHandler{
-		w:  w,
-		mu: &sync.Mutex{},
+		w:     w,
+		mu:    &sync.Mutex{},
+		level: level,
 	}
 }
 
 func (h *otelHandler) Enabled(_ context.Context, level slog.Level) bool {
-	return level >= slog.LevelDebug
+	return level >= h.level
 }
 
 func (h *otelHandler) Handle(ctx context.Context, r slog.Record) error {
@@ -53,6 +55,7 @@ func (h *otelHandler) Handle(ctx context.Context, r slog.Record) error {
 
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
 		rec["traceId"] = OTelTraceID(traceID)
+		delete(attrs, "trace_id")
 	}
 
 	h.mu.Lock()
@@ -74,6 +77,7 @@ func (h *otelHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &otelHandler{
 		w:     h.w,
 		mu:    h.mu,
+		level: h.level,
 		attrs: newAttrs,
 		group: h.group,
 	}
@@ -87,6 +91,7 @@ func (h *otelHandler) WithGroup(name string) slog.Handler {
 	return &otelHandler{
 		w:     h.w,
 		mu:    h.mu,
+		level: h.level,
 		attrs: h.attrs,
 		group: newGroup,
 	}

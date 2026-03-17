@@ -29,6 +29,12 @@ func main() {
 	flag.BoolVar(&cfg.Debug, "debug", false, "enable debug logging with OTel JSON Lines output")
 	flag.BoolVar(&cfg.OTel, "otel", false, "enable OpenTelemetry tracing (OTLP HTTP exporter)")
 	flag.IntVar(&cfg.OTelBodyLimit, "otel-body-limit", config.DefaultOTelBodyLimit, "max bytes of request body to capture in OTel spans (0 = unlimited)")
+	flag.StringVar(&cfg.LogFile.Path, "log-file", "", "write logs to file with rotation (for agent debugging)")
+	flag.IntVar(&cfg.LogFile.MaxSize, "log-max-size", logging.DefaultLogMaxSize, "max log file size in MB before rotation")
+	flag.IntVar(&cfg.LogFile.MaxBackups, "log-max-backups", logging.DefaultLogMaxBackups, "max number of old log files to retain")
+	flag.IntVar(&cfg.LogFile.MaxAge, "log-max-age", logging.DefaultLogMaxAge, "max days to retain old log files")
+	flag.BoolVar(&cfg.LogFile.Compress, "log-compress", false, "compress rotated log files with gzip")
+	flag.BoolVar(&cfg.LogFile.Console, "log-console", false, "also write logs to console when -log-file is set")
 	flag.Parse()
 
 	if err := config.ApplyEnvOverrides(&cfg); err != nil {
@@ -36,7 +42,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.SetDefault(slog.New(logging.NewHandler(cfg.Debug)))
+	logHandler, logCloser := logging.NewHandler(cfg.Debug, cfg.LogFile)
+	slog.SetDefault(slog.New(logHandler))
+
+	if cfg.LogFile.Path != "" {
+		slog.Info("file logging enabled", "path", cfg.LogFile.Path)
+	}
 
 	var otelShutdown func(context.Context) error
 	if cfg.OTel {
@@ -112,6 +123,9 @@ func main() {
 			if err := otelShutdown(ctx); err != nil {
 				slog.Error("otel shutdown error", "err", err)
 			}
+		}
+		if err := logCloser.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "log close error: %v\n", err)
 		}
 		close(done)
 	}()

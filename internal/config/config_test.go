@@ -115,3 +115,35 @@ func TestDefaultDBPathFor(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyEnvOverrides_LogFields(t *testing.T) {
+	t.Setenv("KIROCC_LOG_FILE", "/tmp/test.log")
+	t.Setenv("KIROCC_LOG_MAX_SIZE", "50")
+	t.Setenv("KIROCC_LOG_MAX_BACKUPS", "10")
+	t.Setenv("KIROCC_LOG_MAX_AGE", "30")
+	t.Setenv("KIROCC_LOG_COMPRESS", "true")
+	t.Setenv("KIROCC_LOG_CONSOLE", "true")
+
+	cfg := Config{}
+	if err := ApplyEnvOverrides(&cfg); err != nil {
+		t.Fatalf("ApplyEnvOverrides: %v", err)
+	}
+	if cfg.LogFile.Path != "/tmp/test.log" {
+		t.Errorf("LogFile.Path = %q, want %q", cfg.LogFile.Path, "/tmp/test.log")
+	}
+	if cfg.LogFile.MaxSize != 50 {
+		t.Errorf("LogFile.MaxSize = %d, want 50", cfg.LogFile.MaxSize)
+	}
+	if cfg.LogFile.MaxBackups != 10 {
+		t.Errorf("LogFile.MaxBackups = %d, want 10", cfg.LogFile.MaxBackups)
+	}
+	if cfg.LogFile.MaxAge != 30 {
+		t.Errorf("LogFile.MaxAge = %d, want 30", cfg.LogFile.MaxAge)
+	}
+	if !cfg.LogFile.Compress {
+		t.Error("LogFile.Compress = false, want true")
+	}
+	if !cfg.LogFile.Console {
+		t.Error("LogFile.Console = false, want true")
+	}
+}

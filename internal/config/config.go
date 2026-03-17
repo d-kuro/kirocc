@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+
+	"github.com/d-kuro/kirocc/internal/logging"
 )
 
 // DefaultOTelBodyLimit is the default max bytes of request body to capture in OTel spans.
@@ -20,6 +22,7 @@ type Config struct {
 	Debug         bool
 	OTel          bool
 	OTelBodyLimit int
+	LogFile       logging.LogFileConfig
 }
 
 // DefaultDBPath returns the default kiro-cli SQLite database location.
@@ -56,6 +59,22 @@ func ApplyEnvOverrides(cfg *Config) error {
 		return err
 	}
 	if err := applyInt("KIROCC_OTEL_BODY_LIMIT", &cfg.OTelBodyLimit); err != nil {
+		return err
+	}
+	applyString("KIROCC_LOG_FILE", &cfg.LogFile.Path)
+	if err := applyInt("KIROCC_LOG_MAX_SIZE", &cfg.LogFile.MaxSize); err != nil {
+		return err
+	}
+	if err := applyInt("KIROCC_LOG_MAX_BACKUPS", &cfg.LogFile.MaxBackups); err != nil {
+		return err
+	}
+	if err := applyInt("KIROCC_LOG_MAX_AGE", &cfg.LogFile.MaxAge); err != nil {
+		return err
+	}
+	if err := applyBool("KIROCC_LOG_COMPRESS", &cfg.LogFile.Compress); err != nil {
+		return err
+	}
+	if err := applyBool("KIROCC_LOG_CONSOLE", &cfg.LogFile.Console); err != nil {
 		return err
 	}
 	return nil

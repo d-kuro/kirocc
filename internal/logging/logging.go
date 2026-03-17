@@ -2,6 +2,7 @@ package logging
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lmittmann/tint"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 type traceIDKey struct{}
@@ -81,14 +83,77 @@ func (s SafeHeaders) LogValue() slog.Value {
 	return slog.GroupValue(attrs...)
 }
 
-// debug=false: tint colored handler (INFO+)
-// debug=true: OTel JSON Lines handler (DEBUG+)
-func NewHandler(debug bool) slog.Handler {
+const (
+	DefaultLogMaxSize    = 10 // MB - small enough for coding agents to read
+	DefaultLogMaxBackups = 5
+	DefaultLogMaxAge     = 7 // days
+)
+
+// LogFileConfig configures optional file logging with rotation.
+// Zero values for MaxSize, MaxBackups, and MaxAge fall back to package defaults.
+type LogFileConfig struct {
+	Path       string
+	MaxSize    int // megabytes
+	MaxBackups int
+	MaxAge     int // days
+	Compress   bool
+	Console    bool // when true, also write to console (default: file only)
+}
+
+// NewHandler creates a slog handler with three modes:
+//   - No log file: console handler only (tint or OTel JSON Lines based on debug)
+//   - Log file without Console: file handler only (OTel JSON Lines to rotating file)
+//   - Log file with Console: MultiHandler writing to both console and file
+//
+// The returned io.Closer must be called on shutdown to flush the log file.
+func NewHandler(debug bool, logCfg LogFileConfig) (slog.Handler, io.Closer) {
+	level := slog.LevelInfo
 	if debug {
-		return NewOTelHandler(os.Stderr)
+		level = slog.LevelDebug
+	}
+
+	if logCfg.Path == "" {
+		return newConsoleHandler(debug, level), nopCloser{}
+	}
+
+	maxSize := logCfg.MaxSize
+	if maxSize == 0 {
+		maxSize = DefaultLogMaxSize
+	}
+	maxBackups := logCfg.MaxBackups
+	if maxBackups == 0 {
+		maxBackups = DefaultLogMaxBackups
+	}
+	maxAge := logCfg.MaxAge
+	if maxAge == 0 {
+		maxAge = DefaultLogMaxAge
+	}
+
+	lj := &lumberjack.Logger{
+		Filename:   logCfg.Path,
+		MaxSize:    maxSize,
+		MaxBackups: maxBackups,
+		MaxAge:     maxAge,
+		Compress:   logCfg.Compress,
+	}
+	fileHandler := NewOTelHandler(lj, level)
+
+	if logCfg.Console {
+		return slog.NewMultiHandler(newConsoleHandler(debug, level), fileHandler), lj
+	}
+	return fileHandler, lj
+}
+
+func newConsoleHandler(debug bool, level slog.Level) slog.Handler {
+	if debug {
+		return NewOTelHandler(os.Stderr, level)
 	}
 	return tint.NewHandler(os.Stderr, &tint.Options{
-		Level:      slog.LevelInfo,
+		Level:      level,
 		TimeFormat: "2006-01-02 15:04:05",
 	})
 }
+
+type nopCloser struct{}
+
+func (nopCloser) Close() error { return nil }
