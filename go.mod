@@ -13,7 +13,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.42.0
 	golang.org/x/sync v0.20.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	modernc.org/sqlite v1.46.2
+	modernc.org/sqlite v1.47.0
 )
 
 require (
