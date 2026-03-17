@@ -6,14 +6,17 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/d-kuro/kirocc/internal/logging"
-
 	messagesapp "github.com/d-kuro/kirocc/internal/app/messages"
+	"github.com/d-kuro/kirocc/internal/logging"
+	"github.com/d-kuro/kirocc/internal/tracing"
 )
 
 func traceMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		traceID := logging.NewTraceID()
+		traceID := tracing.ExtractTraceID(r.Context())
+		if traceID == "" {
+			traceID = logging.NewTraceID()
+		}
 		ctx := logging.WithTraceID(r.Context(), traceID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

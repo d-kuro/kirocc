@@ -17,6 +17,7 @@ import (
 	"github.com/d-kuro/kirocc/internal/logging"
 	"github.com/d-kuro/kirocc/internal/server"
 	"github.com/d-kuro/kirocc/internal/tokencount"
+	"github.com/d-kuro/kirocc/internal/tracing"
 )
 
 func main() {
@@ -26,6 +27,8 @@ func main() {
 	flag.StringVar(&cfg.DBPath, "db", config.DefaultDBPath(), "kiro-cli SQLite DB path")
 	flag.StringVar(&cfg.APIKey, "api-key", "", "optional API key for authentication")
 	flag.BoolVar(&cfg.Debug, "debug", false, "enable debug logging with OTel JSON Lines output")
+	flag.BoolVar(&cfg.OTel, "otel", false, "enable OpenTelemetry tracing (OTLP HTTP exporter)")
+	flag.IntVar(&cfg.OTelBodyLimit, "otel-body-limit", config.DefaultOTelBodyLimit, "max bytes of request body to capture in OTel spans (0 = unlimited)")
 	flag.Parse()
 
 	if err := config.ApplyEnvOverrides(&cfg); err != nil {
@@ -35,8 +38,19 @@ func main() {
 
 	slog.SetDefault(slog.New(logging.NewHandler(cfg.Debug)))
 
+	var otelShutdown func(context.Context) error
+	if cfg.OTel {
+		shutdown, err := tracing.Init(context.Background())
+		if err != nil {
+			slog.Error("otel init error", "err", err)
+			os.Exit(1)
+		}
+		otelShutdown = shutdown
+		slog.Info("OpenTelemetry tracing enabled", "body_limit", cfg.OTelBodyLimit)
+	}
+
 	authMgr := auth.NewAuthManager(cfg.DBPath)
-	kiroClient := kiroclient.NewHTTPClient(
+	clientOpts := []kiroclient.HTTPClientOption{
 		kiroclient.WithTokenCounter(tokencount.CountBytes),
 		kiroclient.WithTokenRefresher(func(ctx context.Context) (string, error) {
 			// Invalidate cache so GetToken re-reads from DB and refreshes
@@ -48,8 +62,17 @@ func main() {
 			}
 			return creds.AccessToken, nil
 		}),
-	)
-	srv := server.New(authMgr, cfg.APIKey, kiroClient)
+	}
+	if cfg.OTel {
+		clientOpts = append(clientOpts, kiroclient.WithOTel(cfg.OTelBodyLimit))
+	}
+	kiroClient := kiroclient.NewHTTPClient(clientOpts...)
+
+	var serverOpts []server.ServerOption
+	if cfg.OTel {
+		serverOpts = append(serverOpts, server.WithOTel(cfg.OTelBodyLimit))
+	}
+	srv := server.New(authMgr, cfg.APIKey, kiroClient, serverOpts...)
 
 	// Eagerly initialize tiktoken so the first API request doesn't block on BPE data fetch.
 	go tokencount.Preload()
@@ -84,6 +107,11 @@ func main() {
 		defer cancel()
 		if err := httpSrv.Shutdown(ctx); err != nil {
 			slog.Error("shutdown error", "err", err)
+		}
+		if otelShutdown != nil {
+			if err := otelShutdown(ctx); err != nil {
+				slog.Error("otel shutdown error", "err", err)
+			}
 		}
 		close(done)
 	}()

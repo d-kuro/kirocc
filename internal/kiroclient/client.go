@@ -11,8 +11,12 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 	"github.com/d-kuro/kirocc/internal/logging"
+	"github.com/d-kuro/kirocc/internal/tracing"
 	"github.com/google/uuid"
 )
 
@@ -45,6 +49,8 @@ type TokenRefresher func(ctx context.Context) (newToken string, err error)
 type HTTPClient struct {
 	httpClient     *http.Client
 	baseURL        string // override for tests; empty = use region-based URL
+	otel           bool
+	otelBodyLimit  int
 	tokenRefresher TokenRefresher
 	countTokens    func([]byte) (int, error) // nil = skip token counting
 }
@@ -67,6 +73,14 @@ func WithTokenCounter(fn func([]byte) (int, error)) HTTPClientOption {
 	return func(c *HTTPClient) { c.countTokens = fn }
 }
 
+// WithOTel enables OpenTelemetry tracing on outgoing requests.
+func WithOTel(bodyLimit int) HTTPClientOption {
+	return func(c *HTTPClient) {
+		c.otel = true
+		c.otelBodyLimit = bodyLimit
+	}
+}
+
 // NewHTTPClient creates a new HTTPClient.
 func NewHTTPClient(opts ...HTTPClientOption) *HTTPClient {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -75,15 +89,23 @@ func NewHTTPClient(opts ...HTTPClientOption) *HTTPClient {
 	transport.IdleConnTimeout = 90 * time.Second
 	transport.ResponseHeaderTimeout = 30 * time.Second
 
-	c := &HTTPClient{
-		httpClient: &http.Client{
-			Transport: transport,
-		},
-	}
+	c := &HTTPClient{}
 	for _, opt := range opts {
 		opt(c)
 	}
+
+	var rt http.RoundTripper = transport
+	if c.otel {
+		rt = tracing.WrapTransport(transport, c.otelBodyLimit)
+	}
+	c.httpClient = &http.Client{Transport: rt}
 	return c
+}
+
+func (c *HTTPClient) recordError(ctx context.Context, err error) {
+	if c.otel {
+		tracing.RecordError(ctx, err)
+	}
 }
 
 func (c *HTTPClient) endpointURL(region string) string {
@@ -96,6 +118,16 @@ func (c *HTTPClient) endpointURL(region string) string {
 // GenerateAssistantResponse sends a request to the Kiro API with retry logic.
 func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string, payload *kiroproto.Payload, region string) (*Response, error) {
 	endpoint := c.endpointURL(region)
+
+	if c.otel {
+		var span trace.Span
+		ctx, span = tracing.Tracer().Start(ctx, "kiro.GenerateAssistantResponse")
+		defer span.End()
+		span.SetAttributes(
+			attribute.String("kiro.region", region),
+			attribute.String("kiro.endpoint", endpoint),
+		)
+	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -149,6 +181,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 				}
 				continue
 			}
+			c.recordError(ctx, err)
 			return nil, fmt.Errorf("do request: %w", err)
 		}
 
@@ -180,7 +213,9 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 					continue
 				}
 			}
-			return nil, fmt.Errorf("kiro api returned 403 Forbidden")
+			err := fmt.Errorf("kiro api returned 403 Forbidden")
+			c.recordError(ctx, err)
+			return nil, err
 
 		case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
 			errBody := readErrorBody(resp.Body)
@@ -195,15 +230,21 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 				}
 				continue
 			}
-			return nil, fmt.Errorf("kiro api returned %d: %s", resp.StatusCode, errBody)
+			err := fmt.Errorf("kiro api returned %d: %s", resp.StatusCode, errBody)
+			c.recordError(ctx, err)
+			return nil, err
 
 		default:
 			errBody := readErrorBody(resp.Body)
-			return nil, fmt.Errorf("kiro api returned %d: %s", resp.StatusCode, errBody)
+			err := fmt.Errorf("kiro api returned %d: %s", resp.StatusCode, errBody)
+			c.recordError(ctx, err)
+			return nil, err
 		}
 	}
 
-	return nil, fmt.Errorf("kiro api: max retries exceeded")
+	err = fmt.Errorf("kiro api: max retries exceeded")
+	c.recordError(ctx, err)
+	return nil, err
 }
 
 // backoffDelay returns exponential backoff delay with ±25% jitter.

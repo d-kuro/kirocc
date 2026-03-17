@@ -54,8 +54,8 @@ var sensitiveHeaders = map[string]bool{
 	"X-Amz-Security-Token": true,
 }
 
-// isSensitiveHeader returns true if the canonicalized header name should be redacted.
-func isSensitiveHeader(name string) bool {
+// IsSensitiveHeader returns true if the canonicalized header name should be redacted.
+func IsSensitiveHeader(name string) bool {
 	if sensitiveHeaders[name] {
 		return true
 	}
@@ -72,7 +72,7 @@ type SafeHeaders struct{ H http.Header }
 func (s SafeHeaders) LogValue() slog.Value {
 	attrs := make([]slog.Attr, 0, len(s.H))
 	for k, vs := range s.H {
-		if isSensitiveHeader(k) {
+		if IsSensitiveHeader(k) {
 			attrs = append(attrs, slog.String(k, "[REDACTED]"))
 		} else {
 			attrs = append(attrs, slog.String(k, strings.Join(vs, ", ")))

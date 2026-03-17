@@ -2,8 +2,6 @@ export GOEXPERIMENT := jsonv2
 
 BIN := dist/kirocc
 
-PORT ?= 3456
-
 .PHONY: build install run debug test test-e2e lint vet fmt fix clean
 
 build:
@@ -13,10 +11,10 @@ install:
 	go install ./cmd/kirocc
 
 run:
-	go run ./cmd/kirocc -port $(PORT)
+	go run ./cmd/kirocc $(ARGS)
 
 debug:
-	go run ./cmd/kirocc -debug -port $(PORT)
+	go run ./cmd/kirocc -debug $(ARGS)
 
 test:
 	go test -race ./...

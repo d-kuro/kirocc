@@ -8,13 +8,18 @@ import (
 	"strconv"
 )
 
+// DefaultOTelBodyLimit is the default max bytes of request body to capture in OTel spans.
+const DefaultOTelBodyLimit = 32 * 1024
+
 // Config is the runtime configuration for kirocc.
 type Config struct {
-	Port   int
-	Host   string
-	DBPath string
-	APIKey string
-	Debug  bool
+	Port          int
+	Host          string
+	DBPath        string
+	APIKey        string
+	Debug         bool
+	OTel          bool
+	OTelBodyLimit int
 }
 
 // DefaultDBPath returns the default kiro-cli SQLite database location.
@@ -45,6 +50,12 @@ func ApplyEnvOverrides(cfg *Config) error {
 		return err
 	}
 	if err := applyBool("KIROCC_DEBUG", &cfg.Debug); err != nil {
+		return err
+	}
+	if err := applyBool("KIROCC_OTEL", &cfg.OTel); err != nil {
+		return err
+	}
+	if err := applyInt("KIROCC_OTEL_BODY_LIMIT", &cfg.OTelBodyLimit); err != nil {
 		return err
 	}
 	return nil
