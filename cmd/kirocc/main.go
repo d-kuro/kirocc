@@ -28,7 +28,7 @@ func main() {
 	flag.StringVar(&cfg.APIKey, "api-key", "", "optional API key for authentication")
 	flag.BoolVar(&cfg.Debug, "debug", false, "enable debug logging with OTel JSON Lines output")
 	flag.BoolVar(&cfg.OTel, "otel", false, "enable OpenTelemetry tracing (OTLP HTTP exporter)")
-	flag.IntVar(&cfg.OTelBodyLimit, "otel-body-limit", 32*1024, "max bytes of request body to capture in OTel spans (0 = unlimited)")
+	flag.IntVar(&cfg.OTelBodyLimit, "otel-body-limit", config.DefaultOTelBodyLimit, "max bytes of request body to capture in OTel spans (0 = unlimited)")
 	flag.Parse()
 
 	if err := config.ApplyEnvOverrides(&cfg); err != nil {

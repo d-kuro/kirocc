@@ -228,15 +228,27 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 				}
 				continue
 			}
-			return nil, fmt.Errorf("kiro api returned %d: %s", resp.StatusCode, errBody)
+			err := fmt.Errorf("kiro api returned %d: %s", resp.StatusCode, errBody)
+			if c.otel {
+				tracing.RecordError(ctx, err)
+			}
+			return nil, err
 
 		default:
 			errBody := readErrorBody(resp.Body)
-			return nil, fmt.Errorf("kiro api returned %d: %s", resp.StatusCode, errBody)
+			err := fmt.Errorf("kiro api returned %d: %s", resp.StatusCode, errBody)
+			if c.otel {
+				tracing.RecordError(ctx, err)
+			}
+			return nil, err
 		}
 	}
 
-	return nil, fmt.Errorf("kiro api: max retries exceeded")
+	err = fmt.Errorf("kiro api: max retries exceeded")
+	if c.otel {
+		tracing.RecordError(ctx, err)
+	}
+	return nil, err
 }
 
 // backoffDelay returns exponential backoff delay with ±25% jitter.

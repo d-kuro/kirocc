@@ -44,8 +44,11 @@ func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		bodyReader, err := req.GetBody()
 		if err == nil {
 			readLimit := t.bodyLimit
-			if readLimit == 0 {
+			if readLimit <= 0 {
 				readLimit = int(req.ContentLength)
+			}
+			if readLimit <= 0 {
+				readLimit = 32 * 1024 // fallback for unknown ContentLength
 			}
 			buf, _ := io.ReadAll(io.LimitReader(bodyReader, int64(readLimit)))
 			_ = bodyReader.Close()

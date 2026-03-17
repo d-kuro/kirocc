@@ -17,7 +17,7 @@ import (
 // Middleware returns an HTTP middleware that creates OTel server spans and
 // records request/response headers and request body as span events.
 func Middleware(next http.Handler, bodyLimit int) http.Handler {
-	otelMW := otelhttp.NewMiddleware("kirocc-server",
+	otelMW := otelhttp.NewMiddleware(ServiceName+"-server",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 			return r.Method + " " + r.URL.Path
 		}),

@@ -14,10 +14,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const (
-	// ServiceName is the OTel service name used for resource and tracer identification.
-	ServiceName = "kirocc"
-)
+// ServiceName is the OTel service name used for resource and tracer identification.
+const ServiceName = "kirocc"
 
 // Init initializes the OTel TracerProvider with an OTLP HTTP exporter.
 // The OTLP endpoint is configured via the standard OTEL_EXPORTER_OTLP_ENDPOINT

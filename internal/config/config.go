@@ -8,6 +8,9 @@ import (
 	"strconv"
 )
 
+// DefaultOTelBodyLimit is the default max bytes of request body to capture in OTel spans.
+const DefaultOTelBodyLimit = 32 * 1024
+
 // Config is the runtime configuration for kirocc.
 type Config struct {
 	Port          int
