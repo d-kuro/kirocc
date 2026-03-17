@@ -34,6 +34,7 @@ func main() {
 	flag.IntVar(&cfg.LogFile.MaxBackups, "log-max-backups", logging.DefaultLogMaxBackups, "max number of old log files to retain")
 	flag.IntVar(&cfg.LogFile.MaxAge, "log-max-age", logging.DefaultLogMaxAge, "max days to retain old log files")
 	flag.BoolVar(&cfg.LogFile.Compress, "log-compress", false, "compress rotated log files with gzip")
+	flag.BoolVar(&cfg.LogFile.Console, "log-console", false, "also write logs to console when -log-file is set")
 	flag.Parse()
 
 	if err := config.ApplyEnvOverrides(&cfg); err != nil {

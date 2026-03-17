@@ -397,11 +397,14 @@ func TestNewHandler(t *testing.T) {
 		name       string
 		debug      bool
 		useLogFile bool
+		console    bool
 	}{
-		{"console only", false, false},
-		{"console only debug", true, false},
-		{"with log file", false, true},
-		{"with log file and debug", true, true},
+		{"console only", false, false, false},
+		{"console only debug", true, false, false},
+		{"file only", false, true, false},
+		{"file only debug", true, true, false},
+		{"file and console", false, true, true},
+		{"file and console debug", true, true, true},
 	}
 
 	for _, tt := range tests {
@@ -412,6 +415,7 @@ func TestNewHandler(t *testing.T) {
 				logCfg.MaxSize = 1
 				logCfg.MaxBackups = 1
 				logCfg.MaxAge = 1
+				logCfg.Console = tt.console
 			}
 
 			handler, closer := NewHandler(tt.debug, logCfg)

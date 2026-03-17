@@ -74,6 +74,9 @@ func ApplyEnvOverrides(cfg *Config) error {
 	if err := applyBool("KIROCC_LOG_COMPRESS", &cfg.LogFile.Compress); err != nil {
 		return err
 	}
+	if err := applyBool("KIROCC_LOG_CONSOLE", &cfg.LogFile.Console); err != nil {
+		return err
+	}
 	return nil
 }
 

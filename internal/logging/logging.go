@@ -97,10 +97,14 @@ type LogFileConfig struct {
 	MaxBackups int
 	MaxAge     int // days
 	Compress   bool
+	Console    bool // when true, also write to console (default: file only)
 }
 
-// NewHandler creates a slog handler. When logCfg.Path is set, it returns a
-// MultiHandler that writes to both the console and a rotating log file.
+// NewHandler creates a slog handler with three modes:
+//   - No log file: console handler only (tint or OTel JSON Lines based on debug)
+//   - Log file without Console: file handler only (OTel JSON Lines to rotating file)
+//   - Log file with Console: MultiHandler writing to both console and file
+//
 // The returned io.Closer must be called on shutdown to flush the log file.
 func NewHandler(debug bool, logCfg LogFileConfig) (slog.Handler, io.Closer) {
 	level := slog.LevelInfo
@@ -108,18 +112,8 @@ func NewHandler(debug bool, logCfg LogFileConfig) (slog.Handler, io.Closer) {
 		level = slog.LevelDebug
 	}
 
-	var consoleHandler slog.Handler
-	if debug {
-		consoleHandler = NewOTelHandler(os.Stderr, level)
-	} else {
-		consoleHandler = tint.NewHandler(os.Stderr, &tint.Options{
-			Level:      level,
-			TimeFormat: "2006-01-02 15:04:05",
-		})
-	}
-
 	if logCfg.Path == "" {
-		return consoleHandler, nopCloser{}
+		return newConsoleHandler(debug, level), nopCloser{}
 	}
 
 	maxSize := logCfg.MaxSize
@@ -144,7 +138,20 @@ func NewHandler(debug bool, logCfg LogFileConfig) (slog.Handler, io.Closer) {
 	}
 	fileHandler := NewOTelHandler(lj, level)
 
-	return slog.NewMultiHandler(consoleHandler, fileHandler), lj
+	if logCfg.Console {
+		return slog.NewMultiHandler(newConsoleHandler(debug, level), fileHandler), lj
+	}
+	return fileHandler, lj
+}
+
+func newConsoleHandler(debug bool, level slog.Level) slog.Handler {
+	if debug {
+		return NewOTelHandler(os.Stderr, level)
+	}
+	return tint.NewHandler(os.Stderr, &tint.Options{
+		Level:      level,
+		TimeFormat: "2006-01-02 15:04:05",
+	})
 }
 
 type nopCloser struct{}

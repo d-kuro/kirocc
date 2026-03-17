@@ -122,6 +122,7 @@ func TestApplyEnvOverrides_LogFields(t *testing.T) {
 	t.Setenv("KIROCC_LOG_MAX_BACKUPS", "10")
 	t.Setenv("KIROCC_LOG_MAX_AGE", "30")
 	t.Setenv("KIROCC_LOG_COMPRESS", "true")
+	t.Setenv("KIROCC_LOG_CONSOLE", "true")
 
 	cfg := Config{}
 	if err := ApplyEnvOverrides(&cfg); err != nil {
@@ -141,5 +142,8 @@ func TestApplyEnvOverrides_LogFields(t *testing.T) {
 	}
 	if !cfg.LogFile.Compress {
 		t.Error("LogFile.Compress = false, want true")
+	}
+	if !cfg.LogFile.Console {
+		t.Error("LogFile.Console = false, want true")
 	}
 }
