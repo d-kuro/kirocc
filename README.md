@@ -18,6 +18,7 @@ Just set `ANTHROPIC_BASE_URL` from any Anthropic API client (e.g., Claude Code) 
 - **Retry** — Exponential backoff retry for 403 (token expiry), 429, and 5xx errors. Also retries thinking-only (empty visible) responses
 - **API key auth** — Optional access restriction for the proxy itself
 - **CORS** — Allows requests from localhost origins
+- **OpenTelemetry tracing** — Opt-in distributed tracing via `--otel` with OTLP HTTP exporter. Captures request/response headers and body as span events across the full proxy chain
 
 ## Prerequisites
 
@@ -60,13 +61,15 @@ claude
 
 ### Command-line options
 
-| Flag       | Default                   | Description                          |
-| ---------- | ------------------------- | ------------------------------------ |
-| `-port`    | `3456`                    | Listen port                          |
-| `-host`    | `127.0.0.1`               | Bind host                            |
-| `-db`      | (OS-dependent, see below) | Kiro CLI SQLite DB path              |
-| `-api-key` | (none)                    | API key required to access the proxy |
-| `-debug`   | `false`                   | Enable debug logging                 |
+| Flag               | Default                   | Description                                                        |
+| ------------------ | ------------------------- | ------------------------------------------------------------------ |
+| `-port`            | `3456`                    | Listen port                                                        |
+| `-host`            | `127.0.0.1`               | Bind host                                                          |
+| `-db`              | (OS-dependent, see below) | Kiro CLI SQLite DB path                                            |
+| `-api-key`         | (none)                    | API key required to access the proxy                               |
+| `-debug`           | `false`                   | Enable debug logging                                               |
+| `-otel`            | `false`                   | Enable OpenTelemetry tracing (OTLP HTTP exporter)                  |
+| `-otel-body-limit` | `32768`                   | Max bytes of request body to capture in OTel spans (0 = unlimited) |
 
 #### Default DB path
 
@@ -79,13 +82,29 @@ claude
 
 Command-line options can be overridden with environment variables.
 
-| Variable         | Corresponding option |
-| ---------------- | -------------------- |
-| `KIROCC_PORT`    | `-port`              |
-| `KIROCC_HOST`    | `-host`              |
-| `KIROCC_DB_PATH` | `-db`                |
-| `KIROCC_API_KEY` | `-api-key`           |
-| `KIROCC_DEBUG`   | `-debug`             |
+| Variable                 | Corresponding option |
+| ------------------------ | -------------------- |
+| `KIROCC_PORT`            | `-port`              |
+| `KIROCC_HOST`            | `-host`              |
+| `KIROCC_DB_PATH`         | `-db`                |
+| `KIROCC_API_KEY`         | `-api-key`           |
+| `KIROCC_DEBUG`           | `-debug`             |
+| `KIROCC_OTEL`            | `-otel`              |
+| `KIROCC_OTEL_BODY_LIMIT` | `-otel-body-limit`   |
+
+### OpenTelemetry tracing
+
+Enable distributed tracing to visualize the full request chain in Jaeger, Grafana Tempo, or any OTLP-compatible backend.
+
+```bash
+# Start a local collector (e.g., Grafana LGTM stack)
+docker run -d --name lgtm -p 3000:3000 -p 4317:4317 -p 4318:4318 grafana/otel-lgtm
+
+# Start kirocc with tracing enabled
+kirocc -otel
+```
+
+The OTLP endpoint defaults to `http://localhost:4318` and can be configured via the standard `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable.
 
 ### Custom model mappings
 
@@ -116,7 +135,7 @@ flowchart TB
 
     subgraph kirocc ["kirocc (localhost:3456)"]
         direction TB
-        MW["Middleware<br/>(Trace ID, CORS, API Key Auth)"]
+        MW["Middleware<br/>(OTel Tracing, Trace ID, CORS, API Key Auth)"]
         Handler["Messages Handler"]
         Auth["Auth<br/>(SQLite + Token Refresh)"]
 
