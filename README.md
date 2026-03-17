@@ -18,6 +18,7 @@ Just set `ANTHROPIC_BASE_URL` from any Anthropic API client (e.g., Claude Code) 
 - **Retry** — Exponential backoff retry for 403 (token expiry), 429, and 5xx errors. Also retries thinking-only (empty visible) responses
 - **API key auth** — Optional access restriction for the proxy itself
 - **CORS** — Allows requests from localhost origins
+- **File logging** — Write structured logs (OTel JSON Lines) to a rotating file via [lumberjack](https://github.com/natefinch/lumberjack). Defaults optimized for coding agent consumption (10 MB, uncompressed)
 - **OpenTelemetry tracing** — Opt-in distributed tracing via `--otel` with OTLP HTTP exporter. Captures request/response headers and body as span events across the full proxy chain
 
 ## Prerequisites
@@ -68,6 +69,12 @@ claude
 | `-db`              | (OS-dependent, see below) | Kiro CLI SQLite DB path                                            |
 | `-api-key`         | (none)                    | API key required to access the proxy                               |
 | `-debug`           | `false`                   | Enable debug logging                                               |
+| `-log-file`        | (none)                    | Write logs to file with rotation (file-only by default)            |
+| `-log-max-size`    | `10`                      | Max log file size in MB before rotation                            |
+| `-log-max-backups` | `5`                       | Max number of old log files to retain                              |
+| `-log-max-age`     | `7`                       | Max days to retain old log files                                   |
+| `-log-compress`    | `false`                   | Compress rotated log files with gzip                               |
+| `-log-console`     | `false`                   | Also write logs to console when `-log-file` is set                 |
 | `-otel`            | `false`                   | Enable OpenTelemetry tracing (OTLP HTTP exporter)                  |
 | `-otel-body-limit` | `32768`                   | Max bytes of request body to capture in OTel spans (0 = unlimited) |
 
@@ -89,6 +96,12 @@ Command-line options can be overridden with environment variables.
 | `KIROCC_DB_PATH`         | `-db`                |
 | `KIROCC_API_KEY`         | `-api-key`           |
 | `KIROCC_DEBUG`           | `-debug`             |
+| `KIROCC_LOG_FILE`        | `-log-file`          |
+| `KIROCC_LOG_MAX_SIZE`    | `-log-max-size`      |
+| `KIROCC_LOG_MAX_BACKUPS` | `-log-max-backups`   |
+| `KIROCC_LOG_MAX_AGE`     | `-log-max-age`       |
+| `KIROCC_LOG_COMPRESS`    | `-log-compress`      |
+| `KIROCC_LOG_CONSOLE`     | `-log-console`       |
 | `KIROCC_OTEL`            | `-otel`              |
 | `KIROCC_OTEL_BODY_LIMIT` | `-otel-body-limit`   |
 
