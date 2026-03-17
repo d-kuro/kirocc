@@ -119,7 +119,7 @@ func setupCaptureTest(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
 	old := slog.Default()
-	slog.SetDefault(slog.New(logging.NewOTelHandler(&buf)))
+	slog.SetDefault(slog.New(logging.NewOTelHandler(&buf, slog.LevelDebug)))
 	t.Cleanup(func() { slog.SetDefault(old) })
 	t.Cleanup(messagesapp.ConfigureCaptureForTesting(func(context.Context) bool { return true }))
 	return &buf

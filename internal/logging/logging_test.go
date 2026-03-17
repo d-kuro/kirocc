@@ -7,6 +7,8 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -86,7 +88,7 @@ func TestNewTraceID(t *testing.T) {
 
 func TestOTelHandler_JSONStructure(t *testing.T) {
 	var buf bytes.Buffer
-	h := NewOTelHandler(&buf)
+	h := NewOTelHandler(&buf, slog.LevelDebug)
 	logger := slog.New(h)
 
 	logger.Info("test message", "key1", "value1", "key2", 42)
@@ -128,7 +130,7 @@ func TestOTelHandler_JSONStructure(t *testing.T) {
 func TestOTelHandler_TraceID(t *testing.T) {
 	t.Run("with trace ID in context", func(t *testing.T) {
 		var buf bytes.Buffer
-		h := NewOTelHandler(&buf)
+		h := NewOTelHandler(&buf, slog.LevelDebug)
 
 		ctx := WithTraceID(context.Background(), "550e8400-e29b-41d4-a716-446655440000")
 		r := slog.NewRecord(time.Now(), slog.LevelInfo, "test", 0)
@@ -147,7 +149,7 @@ func TestOTelHandler_TraceID(t *testing.T) {
 
 	t.Run("without trace ID", func(t *testing.T) {
 		var buf bytes.Buffer
-		h := NewOTelHandler(&buf)
+		h := NewOTelHandler(&buf, slog.LevelDebug)
 
 		r := slog.NewRecord(time.Now(), slog.LevelInfo, "test", 0)
 		if err := h.Handle(context.Background(), r); err != nil {
@@ -166,7 +168,7 @@ func TestOTelHandler_TraceID(t *testing.T) {
 
 func TestOTelHandler_AttrTypes(t *testing.T) {
 	var buf bytes.Buffer
-	h := NewOTelHandler(&buf)
+	h := NewOTelHandler(&buf, slog.LevelDebug)
 
 	r := slog.NewRecord(time.Now(), slog.LevelInfo, "types", 0)
 	r.AddAttrs(
@@ -209,7 +211,7 @@ func TestOTelHandler_AttrTypes(t *testing.T) {
 
 func TestOTelHandler_WithAttrs(t *testing.T) {
 	var buf bytes.Buffer
-	h := NewOTelHandler(&buf)
+	h := NewOTelHandler(&buf, slog.LevelDebug)
 	h2 := h.WithAttrs([]slog.Attr{slog.String("service", "test")})
 
 	r := slog.NewRecord(time.Now(), slog.LevelInfo, "msg", 0)
@@ -234,7 +236,7 @@ func TestOTelHandler_WithAttrs(t *testing.T) {
 
 func TestOTelHandler_WithGroup(t *testing.T) {
 	var buf bytes.Buffer
-	h := NewOTelHandler(&buf)
+	h := NewOTelHandler(&buf, slog.LevelDebug)
 	h2 := h.WithGroup("grp")
 
 	r := slog.NewRecord(time.Now(), slog.LevelInfo, "msg", 0)
@@ -268,7 +270,7 @@ func TestOTelHandler_SeverityLevels(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.wantText, func(t *testing.T) {
 			var buf bytes.Buffer
-			h := NewOTelHandler(&buf)
+			h := NewOTelHandler(&buf, slog.LevelDebug)
 
 			r := slog.NewRecord(time.Now(), tt.level, "test", 0)
 			if err := h.Handle(context.Background(), r); err != nil {
@@ -290,7 +292,7 @@ func TestOTelHandler_SeverityLevels(t *testing.T) {
 }
 
 func TestOTelHandler_Enabled(t *testing.T) {
-	h := NewOTelHandler(&bytes.Buffer{})
+	h := NewOTelHandler(&bytes.Buffer{}, slog.LevelDebug)
 	if !h.Enabled(context.Background(), slog.LevelDebug) {
 		t.Error("should be enabled for DEBUG")
 	}
@@ -301,7 +303,7 @@ func TestOTelHandler_Enabled(t *testing.T) {
 
 func TestOTelHandler_NoAttrsOmitsField(t *testing.T) {
 	var buf bytes.Buffer
-	h := NewOTelHandler(&buf)
+	h := NewOTelHandler(&buf, slog.LevelDebug)
 
 	r := slog.NewRecord(time.Now(), slog.LevelInfo, "no attrs", 0)
 	if err := h.Handle(context.Background(), r); err != nil {
@@ -320,7 +322,7 @@ func TestOTelHandler_NoAttrsOmitsField(t *testing.T) {
 func TestOTelHandler_JSONTextValue(t *testing.T) {
 	t.Run("valid JSON is embedded as structured data", func(t *testing.T) {
 		var buf bytes.Buffer
-		h := NewOTelHandler(&buf)
+		h := NewOTelHandler(&buf, slog.LevelDebug)
 
 		r := slog.NewRecord(time.Now(), slog.LevelWarn, "capture", 0)
 		r.AddAttrs(slog.Any("data", jsontext.Value(`{"key":"val","num":42}`)))
@@ -347,7 +349,7 @@ func TestOTelHandler_JSONTextValue(t *testing.T) {
 
 	t.Run("invalid JSON falls back to string", func(t *testing.T) {
 		var buf bytes.Buffer
-		h := NewOTelHandler(&buf)
+		h := NewOTelHandler(&buf, slog.LevelDebug)
 
 		r := slog.NewRecord(time.Now(), slog.LevelWarn, "capture", 0)
 		r.AddAttrs(slog.Any("bad", jsontext.Value(`{broken`)))
@@ -364,4 +366,109 @@ func TestOTelHandler_JSONTextValue(t *testing.T) {
 			t.Errorf("bad = %v, want %q", attrs["bad"], "{broken")
 		}
 	})
+}
+
+func TestOTelHandler_LevelFiltering(t *testing.T) {
+	tests := []struct {
+		name     string
+		level    slog.Level
+		logLevel slog.Level
+		wantEmit bool
+	}{
+		{"info handler emits info", slog.LevelInfo, slog.LevelInfo, true},
+		{"info handler skips debug", slog.LevelInfo, slog.LevelDebug, false},
+		{"debug handler emits debug", slog.LevelDebug, slog.LevelDebug, true},
+		{"debug handler emits info", slog.LevelDebug, slog.LevelInfo, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			h := NewOTelHandler(&buf, tt.level)
+			if got := h.Enabled(context.Background(), tt.logLevel); got != tt.wantEmit {
+				t.Errorf("Enabled(%v) = %v, want %v", tt.logLevel, got, tt.wantEmit)
+			}
+		})
+	}
+}
+
+func TestNewHandler(t *testing.T) {
+	tests := []struct {
+		name       string
+		debug      bool
+		useLogFile bool
+	}{
+		{"console only", false, false},
+		{"console only debug", true, false},
+		{"with log file", false, true},
+		{"with log file and debug", true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logCfg LogFileConfig
+			if tt.useLogFile {
+				logCfg.Path = filepath.Join(t.TempDir(), "test.log")
+				logCfg.MaxSize = 1
+				logCfg.MaxBackups = 1
+				logCfg.MaxAge = 1
+			}
+
+			handler, closer := NewHandler(tt.debug, logCfg)
+			t.Cleanup(func() { _ = closer.Close() })
+
+			logger := slog.New(handler)
+			logger.Info("test info message", "key", "value")
+
+			if tt.useLogFile {
+				data, err := os.ReadFile(logCfg.Path)
+				if err != nil {
+					t.Fatalf("read log file: %v", err)
+				}
+				idx := bytes.IndexByte(data, '\n')
+				if idx < 0 {
+					t.Fatal("no newline in log file output")
+				}
+				var rec map[string]any
+				if err := json.Unmarshal(data[:idx], &rec); err != nil {
+					t.Fatalf("invalid JSON in log file: %v", err)
+				}
+				if rec["body"] != "test info message" {
+					t.Errorf("body = %v, want %q", rec["body"], "test info message")
+				}
+			}
+		})
+	}
+}
+
+func TestNewHandler_FileLevelFollowsDebugFlag(t *testing.T) {
+	tests := []struct {
+		name            string
+		debug           bool
+		wantDebugInFile bool
+	}{
+		{"debug off - file gets INFO only", false, false},
+		{"debug on - file gets DEBUG too", true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logPath := filepath.Join(t.TempDir(), "test.log")
+			handler, closer := NewHandler(tt.debug, LogFileConfig{
+				Path: logPath, MaxSize: 1, MaxBackups: 1, MaxAge: 1,
+			})
+			t.Cleanup(func() { _ = closer.Close() })
+
+			logger := slog.New(handler)
+			logger.Debug("debug message")
+			logger.Info("info message")
+
+			data, _ := os.ReadFile(logPath)
+			hasDebug := bytes.Contains(data, []byte("debug message"))
+
+			if hasDebug != tt.wantDebugInFile {
+				t.Errorf("debug in file = %v, want %v", hasDebug, tt.wantDebugInFile)
+			}
+		})
+	}
 }
