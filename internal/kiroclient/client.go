@@ -102,6 +102,12 @@ func NewHTTPClient(opts ...HTTPClientOption) *HTTPClient {
 	return c
 }
 
+func (c *HTTPClient) recordError(ctx context.Context, err error) {
+	if c.otel {
+		tracing.RecordError(ctx, err)
+	}
+}
+
 func (c *HTTPClient) endpointURL(region string) string {
 	if c.baseURL != "" {
 		return c.baseURL
@@ -175,9 +181,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 				}
 				continue
 			}
-			if c.otel {
-				tracing.RecordError(ctx, err)
-			}
+			c.recordError(ctx, err)
 			return nil, fmt.Errorf("do request: %w", err)
 		}
 
@@ -210,9 +214,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 				}
 			}
 			err := fmt.Errorf("kiro api returned 403 Forbidden")
-			if c.otel {
-				tracing.RecordError(ctx, err)
-			}
+			c.recordError(ctx, err)
 			return nil, err
 
 		case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
@@ -229,25 +231,19 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 				continue
 			}
 			err := fmt.Errorf("kiro api returned %d: %s", resp.StatusCode, errBody)
-			if c.otel {
-				tracing.RecordError(ctx, err)
-			}
+			c.recordError(ctx, err)
 			return nil, err
 
 		default:
 			errBody := readErrorBody(resp.Body)
 			err := fmt.Errorf("kiro api returned %d: %s", resp.StatusCode, errBody)
-			if c.otel {
-				tracing.RecordError(ctx, err)
-			}
+			c.recordError(ctx, err)
 			return nil, err
 		}
 	}
 
 	err = fmt.Errorf("kiro api: max retries exceeded")
-	if c.otel {
-		tracing.RecordError(ctx, err)
-	}
+	c.recordError(ctx, err)
 	return nil, err
 }
 

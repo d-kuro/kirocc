@@ -55,9 +55,13 @@ func Middleware(next http.Handler, bodyLimit int) http.Handler {
 func sanitizedHeaderAttrs(prefix string, h http.Header) []attribute.KeyValue {
 	attrs := make([]attribute.KeyValue, 0, len(h))
 	for k, vs := range h {
-		val := strings.Join(vs, ", ")
+		var val string
 		if logging.IsSensitiveHeader(k) {
 			val = "[REDACTED]"
+		} else if len(vs) == 1 {
+			val = vs[0]
+		} else {
+			val = strings.Join(vs, ", ")
 		}
 		attrs = append(attrs, attribute.String(prefix+k, val))
 	}
@@ -73,7 +77,11 @@ type bodyCaptureReader struct {
 }
 
 func newBodyCaptureReader(r io.ReadCloser, limit int) *bodyCaptureReader {
-	return &bodyCaptureReader{r: r, limit: limit}
+	bcr := &bodyCaptureReader{r: r, limit: limit}
+	if limit > 0 {
+		bcr.buf.Grow(limit)
+	}
+	return bcr
 }
 
 func (b *bodyCaptureReader) Read(p []byte) (int, error) {

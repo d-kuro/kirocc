@@ -66,8 +66,7 @@ func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 	resp, err := t.base.RoundTrip(req)
 	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		span.RecordError(err)
+		RecordError(ctx, err)
 		return nil, err
 	}
 
