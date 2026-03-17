@@ -55,6 +55,7 @@ func (h *otelHandler) Handle(ctx context.Context, r slog.Record) error {
 
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
 		rec["traceId"] = OTelTraceID(traceID)
+		delete(attrs, "trace_id")
 	}
 
 	h.mu.Lock()

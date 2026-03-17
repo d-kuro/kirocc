@@ -147,6 +147,31 @@ func TestOTelHandler_TraceID(t *testing.T) {
 		}
 	})
 
+	t.Run("deduplicates trace_id attribute", func(t *testing.T) {
+		var buf bytes.Buffer
+		h := NewOTelHandler(&buf, slog.LevelDebug)
+
+		ctx := WithTraceID(context.Background(), "550e8400-e29b-41d4-a716-446655440000")
+		r := slog.NewRecord(time.Now(), slog.LevelInfo, "test", 0)
+		r.AddAttrs(slog.String("trace_id", "550e8400"))
+		if err := h.Handle(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+
+		var rec map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+			t.Fatalf("invalid JSON: %v", err)
+		}
+		if rec["traceId"] != "550e8400e29b41d4a716446655440000" {
+			t.Errorf("traceId = %v, want full OTel format", rec["traceId"])
+		}
+		if attrs, ok := rec["attributes"].(map[string]any); ok {
+			if _, has := attrs["trace_id"]; has {
+				t.Error("attributes.trace_id should be removed when top-level traceId is set")
+			}
+		}
+	})
+
 	t.Run("without trace ID", func(t *testing.T) {
 		var buf bytes.Buffer
 		h := NewOTelHandler(&buf, slog.LevelDebug)
