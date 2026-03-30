@@ -152,6 +152,10 @@ func SanitizeJSONSchema(schema map[string]any) map[string]any {
 			if arr, ok := value.([]any); ok && len(arr) > 0 {
 				if merged := flattenEnumBranches(arr); merged != nil {
 					maps.Copy(result, merged)
+				} else if nonNull := dropNullBranches(arr); len(nonNull) == 1 {
+					if m, ok := nonNull[0].(map[string]any); ok {
+						maps.Copy(result, SanitizeJSONSchema(m))
+					}
 				} else if first, ok := arr[0].(map[string]any); ok {
 					slog.Warn("lossy schema conversion: using first branch only",
 						"combinator", key, "branches", len(arr))
@@ -169,6 +173,18 @@ func SanitizeJSONSchema(schema map[string]any) map[string]any {
 		}
 	}
 
+	return result
+}
+
+// dropNullBranches returns branches that are not {type: "null"}.
+func dropNullBranches(branches []any) []any {
+	var result []any
+	for _, b := range branches {
+		m, ok := b.(map[string]any)
+		if !ok || m["type"] != "null" {
+			result = append(result, b)
+		}
+	}
 	return result
 }
 
