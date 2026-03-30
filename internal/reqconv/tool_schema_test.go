@@ -147,6 +147,83 @@ func TestSanitizeJSONSchema_FlattensAnyOfEnums(t *testing.T) {
 	}
 }
 
+func TestSanitizeJSONSchema_AnyOfNullable_NoWarning(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	old := slog.Default()
+	slog.SetDefault(logger)
+	defer slog.SetDefault(old)
+
+	schema := map[string]any{
+		"anyOf": []any{
+			map[string]any{"type": "string"},
+			map[string]any{"type": "null"},
+		},
+	}
+	got := SanitizeJSONSchema(schema)
+
+	if got["type"] != "string" {
+		t.Fatalf("expected type string, got %v", got["type"])
+	}
+	if _, ok := got["anyOf"]; ok {
+		t.Fatal("anyOf should be removed")
+	}
+	if buf.Len() > 0 {
+		t.Fatalf("expected no warning for nullable anyOf, got: %q", buf.String())
+	}
+}
+
+func TestSanitizeJSONSchema_OneOfNullable_NoWarning(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	old := slog.Default()
+	slog.SetDefault(logger)
+	defer slog.SetDefault(old)
+
+	schema := map[string]any{
+		"oneOf": []any{
+			map[string]any{"type": "null"},
+			map[string]any{"type": "integer", "description": "count"},
+		},
+	}
+	got := SanitizeJSONSchema(schema)
+
+	if got["type"] != "integer" {
+		t.Fatalf("expected type integer, got %v", got["type"])
+	}
+	if got["description"] != "count" {
+		t.Fatalf("expected description preserved, got %v", got["description"])
+	}
+	if buf.Len() > 0 {
+		t.Fatalf("expected no warning for nullable oneOf, got: %q", buf.String())
+	}
+}
+
+func TestSanitizeJSONSchema_AnyOfNullableMultiNonNull_LogsWarning(t *testing.T) {
+	// When null is removed but 2+ non-null branches remain, lossy fallback should still fire.
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	old := slog.Default()
+	slog.SetDefault(logger)
+	defer slog.SetDefault(old)
+
+	schema := map[string]any{
+		"anyOf": []any{
+			map[string]any{"type": "string"},
+			map[string]any{"type": "integer"},
+			map[string]any{"type": "null"},
+		},
+	}
+	got := SanitizeJSONSchema(schema)
+
+	if got["type"] != "string" {
+		t.Fatalf("expected first non-null branch type, got %v", got["type"])
+	}
+	if !strings.Contains(buf.String(), "anyOf") {
+		t.Fatalf("expected lossy warning, got: %q", buf.String())
+	}
+}
+
 func TestSanitizeJSONSchema_AnyOfNonEnum_LogsWarning(t *testing.T) {
 	// When anyOf has non-enum branches, the lossy first-branch fallback should log a warning.
 	var buf bytes.Buffer
