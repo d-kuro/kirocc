@@ -16,7 +16,7 @@ import (
 const retryReasonEmptyVisibleEndTurn = "empty_visible_end_turn"
 
 func (s *Service) handleStreamingResponse(ctx context.Context, w http.ResponseWriter, apiResp *kiroclient.Response, model string, contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int, capture *upstreamAttemptCapture) string {
-	short := logging.ShortTraceID(logging.TraceIDFromContext(ctx))
+	traceID, short := logging.TraceIDs(ctx)
 
 	gw := NewGateWriter(w)
 	sw := respconv.NewSSEWriter(ctx, gw, model, contextWindowSize, stopSequences, maxTokens, preCountedInputTokens)
@@ -108,7 +108,8 @@ func (s *Service) handleStreamingResponse(ctx context.Context, w http.ResponseWr
 	// Log response completion (only on success).
 	if !streamErr {
 		slog.DebugContext(ctx, "client response headers",
-			"trace_id", short,
+			"trace_id", traceID,
+			"session_id", logging.SessionIDFromContext(ctx),
 			"headers", logging.SafeHeaders{H: gw.Header()},
 		)
 		inputTokens, outputTokens := sw.Usage()
@@ -118,7 +119,7 @@ func (s *Service) handleStreamingResponse(ctx context.Context, w http.ResponseWr
 }
 
 func (s *Service) handleNonStreamingResponse(ctx context.Context, w http.ResponseWriter, apiResp *kiroclient.Response, model string, contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int, capture *upstreamAttemptCapture) string {
-	short := logging.ShortTraceID(logging.TraceIDFromContext(ctx))
+	traceID, short := logging.TraceIDs(ctx)
 	acc := respconv.NewNonStreamingAccumulator(contextWindowSize, stopSequences, maxTokens, preCountedInputTokens)
 
 	var invalidReason string
@@ -176,7 +177,8 @@ func (s *Service) handleNonStreamingResponse(ctx context.Context, w http.Respons
 
 	w.Header().Set("Content-Type", "application/json")
 	slog.DebugContext(ctx, "client response headers",
-		"trace_id", short,
+		"trace_id", traceID,
+		"session_id", logging.SessionIDFromContext(ctx),
 		"headers", logging.SafeHeaders{H: w.Header()},
 	)
 	if err := json.MarshalWrite(w, resp); err != nil {
@@ -199,7 +201,7 @@ func logResponseStats(ctx context.Context, short string, inputTokens, outputToke
 	}
 	slog.InfoContext(ctx, "<-- POST /v1/messages",
 		"trace_id", short,
-		"session_id", logging.SessionIDFromContext(ctx),
+		"session_id", logging.ShortID(logging.SessionIDFromContext(ctx)),
 		"status", 200,
 		"input_tokens", inputTokens,
 		"output_tokens", outputTokens,

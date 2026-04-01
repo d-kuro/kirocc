@@ -31,7 +31,7 @@ type toolSearchOrchestrator struct {
 }
 
 func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.ResponseWriter) string {
-	short := logging.ShortTraceID(logging.TraceIDFromContext(ctx))
+	_, short := logging.TraceIDs(ctx)
 
 	gw := NewGateWriter(w)
 	sw := respconv.NewSSEWriter(ctx, gw, o.buildOpts.ModelID, o.contextWindowSize, o.req.StopSequences, o.req.MaxTokens, 0)
@@ -153,7 +153,7 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 }
 
 func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.ResponseWriter) string {
-	short := logging.ShortTraceID(logging.TraceIDFromContext(ctx))
+	_, short := logging.TraceIDs(ctx)
 
 	msgs := slices.Clone(o.req.Messages)
 

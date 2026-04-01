@@ -146,7 +146,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 
 	currentToken := token
 	invocationID := uuid.New().String()
-	short := logging.ShortTraceID(logging.TraceIDFromContext(ctx))
+	traceID, short := logging.TraceIDs(ctx)
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
@@ -165,7 +165,8 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 		req.Header.Set("amz-sdk-request", fmt.Sprintf("attempt=%d; max=%d", attempt+1, maxRetries+1))
 
 		slog.DebugContext(ctx, "kiro request headers",
-			"trace_id", short,
+			"trace_id", traceID,
+			"session_id", logging.SessionIDFromContext(ctx),
 			"headers", logging.SafeHeaders{H: req.Header},
 		)
 
@@ -188,7 +189,8 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 		switch {
 		case resp.StatusCode == http.StatusOK:
 			slog.DebugContext(ctx, "kiro response headers",
-				"trace_id", short,
+				"trace_id", traceID,
+				"session_id", logging.SessionIDFromContext(ctx),
 				"status", resp.StatusCode,
 				"headers", logging.SafeHeaders{H: resp.Header},
 			)

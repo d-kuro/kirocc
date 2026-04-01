@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func TestShortTraceID(t *testing.T) {
+func TestShortID(t *testing.T) {
 	tests := []struct {
 		name string
 		id   string
@@ -27,11 +27,22 @@ func TestShortTraceID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ShortTraceID(tt.id)
+			got := ShortID(tt.id)
 			if got != tt.want {
-				t.Errorf("ShortTraceID(%q) = %q, want %q", tt.id, got, tt.want)
+				t.Errorf("ShortID(%q) = %q, want %q", tt.id, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTraceIDs(t *testing.T) {
+	ctx := WithTraceID(context.Background(), "550e8400-e29b-41d4-a716-446655440000")
+	full, short := TraceIDs(ctx)
+	if full != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Errorf("full = %q, want full UUID", full)
+	}
+	if short != "550e8400" {
+		t.Errorf("short = %q, want %q", short, "550e8400")
 	}
 }
 

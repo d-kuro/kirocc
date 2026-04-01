@@ -82,16 +82,17 @@ func newUpstreamAttemptCapture(ctx context.Context, payload *kiroproto.Payload, 
 		return nil
 	}
 
+	traceID := logging.TraceIDFromContext(ctx)
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		slog.WarnContext(ctx, "upstream capture request marshal failed",
-			"trace_id", logging.ShortTraceID(logging.TraceIDFromContext(ctx)),
+			"trace_id", logging.ShortID(traceID),
 			"attempt", attempt,
 			"err", err,
 		)
 	}
 
-	traceID := logging.TraceIDFromContext(ctx)
 	current := payload.ConversationState.CurrentMessage.UserInputMessage
 	agentContinuationID := payload.ConversationState.AgentContinuationID
 	currentContentLen := len(current.Content)
@@ -118,7 +119,7 @@ func newUpstreamAttemptCapture(ctx context.Context, payload *kiroproto.Payload, 
 }
 
 func (c *upstreamAttemptCapture) shortTraceID() string {
-	return logging.ShortTraceID(c.traceID)
+	return logging.ShortID(c.traceID)
 }
 
 func (c *upstreamAttemptCapture) setResponseHeaders(h http.Header) {
