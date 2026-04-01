@@ -199,6 +199,7 @@ func logResponseStats(ctx context.Context, short string, inputTokens, outputToke
 	}
 	slog.InfoContext(ctx, "<-- POST /v1/messages",
 		"trace_id", short,
+		"session_id", logging.SessionIDFromContext(ctx),
 		"status", 200,
 		"input_tokens", inputTokens,
 		"output_tokens", outputTokens,

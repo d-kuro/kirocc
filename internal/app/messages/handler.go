@@ -35,6 +35,8 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, "missing "+headerCCSessionID+" header")
 		return
 	}
+	ctx := logging.WithSessionID(r.Context(), ccSessionID)
+	r = r.WithContext(ctx)
 
 	slog.DebugContext(r.Context(), "client request headers",
 		"trace_id", short,
@@ -70,11 +72,11 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.InfoContext(r.Context(), "--> POST /v1/messages",
 		"trace_id", short,
+		"session_id", ccSessionID,
 		"model", kiroModel,
 		"thinking", thinkingLog,
 		"stream", req.Stream,
 		"context_window", contextWindow,
-		"cc_session_id", ccSessionID,
 	)
 
 	thinkingBudget := 0
