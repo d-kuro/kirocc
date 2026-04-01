@@ -21,13 +21,20 @@ func NewTraceID() string {
 	return uuid.New().String()
 }
 
-// ShortTraceID returns the first 8 characters of a trace ID.
+// ShortID returns the first 8 characters of an ID (trace ID, session ID, etc.).
 // If the ID is shorter than 8 characters, it is returned as-is.
-func ShortTraceID(id string) string {
+func ShortID(id string) string {
 	if len(id) < 8 {
 		return id
 	}
 	return id[:8]
+}
+
+// TraceIDs returns the full and shortened trace ID from the context.
+func TraceIDs(ctx context.Context) (full, short string) {
+	full = TraceIDFromContext(ctx)
+	short = ShortID(full)
+	return
 }
 
 // WithTraceID stores a trace ID in the context.

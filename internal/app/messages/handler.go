@@ -19,8 +19,7 @@ import (
 const headerCCSessionID = "X-Claude-Code-Session-Id"
 
 func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
-	traceID := logging.TraceIDFromContext(r.Context())
-	short := logging.ShortTraceID(traceID)
+	traceID, short := logging.TraceIDs(r.Context())
 
 	req, err := parseAndValidateRequest(r.Context(), w, r)
 	if err != nil {
@@ -39,7 +38,8 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 
 	slog.DebugContext(r.Context(), "client request headers",
-		"trace_id", short,
+		"trace_id", traceID,
+		"session_id", ccSessionID,
 		"headers", logging.SafeHeaders{H: r.Header},
 	)
 
@@ -72,7 +72,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.InfoContext(r.Context(), "--> POST /v1/messages",
 		"trace_id", short,
-		"session_id", ccSessionID,
+		"session_id", logging.ShortID(ccSessionID),
 		"model", kiroModel,
 		"thinking", thinkingLog,
 		"stream", req.Stream,
@@ -217,7 +217,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 // Returns a non-empty reason string if the request failed with a retryable invalidStateEvent
 // before the stream started (i.e., no bytes written to w yet). Returns "" on success or non-retryable error.
 func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, payload *kiroproto.Payload, creds *auth.Credentials, model string, contextWindowSize int, thinking bool, attempt int) string {
-	short := logging.ShortTraceID(logging.TraceIDFromContext(ctx))
+	_, short := logging.TraceIDs(ctx)
 	capture := newUpstreamAttemptCapture(ctx, payload, model, thinking, req.Stream, attempt)
 
 	apiResp, err := s.client.GenerateAssistantResponse(ctx, creds.AccessToken, payload, creds.Region)
