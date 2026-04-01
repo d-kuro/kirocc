@@ -53,7 +53,7 @@ func TestE2E_InvalidStateEvent_PreStream(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":true}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 400 {
@@ -70,7 +70,7 @@ func TestE2E_InvalidStateEvent_MidStream(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":true}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
@@ -87,7 +87,7 @@ func TestE2E_InvalidStateEvent_MidStream_ErrorEvent(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":true}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
@@ -105,7 +105,7 @@ func TestE2E_EmptyMessages(t *testing.T) {
 	defer srv.Close()
 
 	reqBody := `{
-		"model":"claude-sonnet-4",
+		"model":"claude-sonnet-4-6",
 		"messages":[
 			{"role":"user","content":""},
 			{"role":"assistant","content":""},
@@ -147,7 +147,7 @@ func TestE2E_TokenUsage_CacheFields(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	var result map[string]any
@@ -182,7 +182,7 @@ func TestE2E_ToolDeduplication(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	var result map[string]any
@@ -216,7 +216,7 @@ func TestE2E_ToolInputMixed(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	var result map[string]any
@@ -245,7 +245,7 @@ func TestE2E_Truncation_Content(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
@@ -276,7 +276,7 @@ func TestE2E_PreCountedTokens_NonStreaming(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	requireStatus(t, resp, 200)
@@ -299,7 +299,7 @@ func TestE2E_PreCountedTokens_Streaming(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":true}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	requireStatus(t, resp, 200)
@@ -321,7 +321,7 @@ func TestE2E_PreCountedTokens_ZeroFallback(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	requireStatus(t, resp, 200)
@@ -351,7 +351,7 @@ func TestE2E_MetadataOverridesPreCounted(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	requireStatus(t, resp, 200)
@@ -379,7 +379,7 @@ func TestE2E_ClientError_Returns502(t *testing.T) {
 	srv := newTCP4TestServer(t, s.Handler())
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 502 {
@@ -406,7 +406,7 @@ func TestE2E_EmptyVisibleEndTurn_NonStreaming_RetrySucceeds(t *testing.T) {
 	srv := newE2EServerWithClient(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	requireStatus(t, resp, 200)
@@ -443,7 +443,7 @@ func TestE2E_EmptyVisibleEndTurn_NonStreaming_RetryAlsoFails(t *testing.T) {
 	srv := newE2EServerWithClient(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	requireStatus(t, resp, 502)
@@ -470,7 +470,7 @@ func TestE2E_EmptyVisibleEndTurn_RetryClearsIDs(t *testing.T) {
 	srv := newE2EServerWithClient(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	requireStatus(t, resp, 200)
@@ -505,7 +505,7 @@ func TestE2E_EmptyVisibleEndTurn_Streaming_RetrySucceeds(t *testing.T) {
 	srv := newE2EServerWithClient(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":true}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	requireStatus(t, resp, 200)
@@ -544,7 +544,7 @@ func TestE2E_EmptyVisibleEndTurn_Streaming_SavesFailureCapture(t *testing.T) {
 	srv := newE2EServerWithClient(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4[1m]","messages":[{"role":"user","content":"hi"}],"stream":true}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6[1m]","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	requireStatus(t, resp, 502)
@@ -623,7 +623,7 @@ func TestE2E_Success_DoesNotSaveFailureCapture(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":true}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	requireStatus(t, resp, 200)

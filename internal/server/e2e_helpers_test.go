@@ -53,7 +53,13 @@ func newE2EServer(t *testing.T, client *capturingClient) *httptest.Server {
 
 func postMessages(t *testing.T, url, body string) *http.Response {
 	t.Helper()
-	resp, err := http.Post(url+"/v1/messages", "application/json", strings.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, url+"/v1/messages", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Claude-Code-Session-Id", "test-session")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

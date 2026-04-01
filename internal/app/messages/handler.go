@@ -16,6 +16,8 @@ import (
 	"github.com/d-kuro/kirocc/internal/toolsearch"
 )
 
+const headerCCSessionID = "X-Claude-Code-Session-Id"
+
 func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	traceID := logging.TraceIDFromContext(r.Context())
 	short := logging.ShortTraceID(traceID)
@@ -25,6 +27,12 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		slog.WarnContext(r.Context(), "invalid request",
 			"trace_id", short, "err", err)
 		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
+		return
+	}
+
+	ccSessionID := r.Header.Get(headerCCSessionID)
+	if ccSessionID == "" {
+		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, "missing "+headerCCSessionID+" header")
 		return
 	}
 
@@ -66,6 +74,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		"thinking", thinkingLog,
 		"stream", req.Stream,
 		"context_window", contextWindow,
+		"cc_session_id", ccSessionID,
 	)
 
 	thinkingBudget := 0
@@ -112,6 +121,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 			buildOpts: reqconv.BuildOptions{
 				ProfileARN:     creds.ProfileARN,
 				ModelID:        kiroModel,
+				ConversationID: ccSessionID,
 				Thinking:       thinking,
 				ThinkingBudget: thinkingBudget,
 				EnvState:       s.envState,
@@ -141,7 +151,14 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, err := reqconv.BuildPayload(req, reqconv.BuildOptions{ProfileARN: creds.ProfileARN, ModelID: kiroModel, Thinking: thinking, ThinkingBudget: thinkingBudget, EnvState: s.envState})
+	payload, err := reqconv.BuildPayload(req, reqconv.BuildOptions{
+		ProfileARN:     creds.ProfileARN,
+		ModelID:        kiroModel,
+		ConversationID: ccSessionID,
+		Thinking:       thinking,
+		ThinkingBudget: thinkingBudget,
+		EnvState:       s.envState,
+	})
 	if err != nil {
 		slog.WarnContext(r.Context(), "payload build error",
 			"trace_id", short, "err", err)

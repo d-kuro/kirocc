@@ -15,7 +15,7 @@ func TestE2E_SimpleText_Streaming(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":true}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
@@ -47,7 +47,7 @@ func TestE2E_SimpleText_NonStreaming(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
@@ -77,7 +77,7 @@ func TestE2E_AgentTaskType(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	if client.captured == nil {
@@ -98,7 +98,7 @@ func TestE2E_ProfileArn_Conditional(t *testing.T) {
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	if client.captured == nil {
