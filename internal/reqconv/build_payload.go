@@ -56,17 +56,11 @@ func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payl
 	// 5. Apply cache points.
 	ApplySystemCachePoints(req.System, history, &userInputMessage)
 
-	// 6. Assemble payload.
-	// Auto-generate conversationID if not provided.
-	conversationID := options.ConversationID
-	if conversationID == "" {
-		conversationID = buildConversationID(options.ModelID, systemPrompt, req.Messages)
-	}
 	// Find the last user-initiated message content (not tool-result continuations)
 	// to make agentContinuationID change per utterance but stable for continuations.
 	lastUserContent := findLastUserUtterance(msgs)
 	convState := kiroproto.ConversationState{
-		ConversationID:  conversationID,
+		ConversationID:  options.ConversationID,
 		ChatTriggerType: kiroproto.ChatTriggerTypeManual,
 		AgentTaskType:   kiroproto.AgentTaskTypeVibe,
 		CurrentMessage:  kiroproto.CurrentMessage{UserInputMessage: userInputMessage},
@@ -74,7 +68,7 @@ func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payl
 	if len(history) > 0 {
 		convState.History = history
 	}
-	convState.AgentContinuationID = buildAgentContinuationID(conversationID, lastUserContent)
+	convState.AgentContinuationID = buildAgentContinuationID(options.ConversationID, lastUserContent)
 	payload := &kiroproto.Payload{ConversationState: convState}
 	if options.ProfileARN != "" {
 		payload.ProfileARN = options.ProfileARN
@@ -306,28 +300,4 @@ func buildHistory(msgs []anthropic.Message, envState *kiroproto.EnvState) []kiro
 		}
 	}
 	return history
-}
-
-// buildConversationID generates a deterministic conversation ID from the model,
-// system prompt, and first user message text. Same inputs always produce the same ID,
-// so the conversation ID stays stable across turns within the same conversation.
-// Falls back to a random UUID if no user message text is found.
-func buildConversationID(modelID, systemPrompt string, msgs []anthropic.Message) string {
-	anchor := firstUserMessageText(msgs)
-	if anchor == "" {
-		return uuid.New().String()
-	}
-	seed := modelID + "\n" + systemPrompt + "\n" + anchor
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(seed)).String()
-}
-
-func firstUserMessageText(msgs []anthropic.Message) string {
-	for _, m := range msgs {
-		if m.Role == "user" {
-			if t := ExtractTextContent(m.Content); t != "" {
-				return t
-			}
-		}
-	}
-	return ""
 }

@@ -137,7 +137,7 @@ func TestCountTokens(t *testing.T) {
 	resp, err := http.Post(
 		srv.URL+"/v1/messages/count_tokens",
 		"application/json",
-		strings.NewReader(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hello"}]}`),
+		strings.NewReader(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hello"}]}`),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -189,7 +189,7 @@ func TestCountTokens_EmptyMessages(t *testing.T) {
 	defer srv.Close()
 
 	resp, err := http.Post(srv.URL+"/v1/messages/count_tokens", "application/json",
-		strings.NewReader(`{"model":"claude-sonnet-4","messages":[]}`))
+		strings.NewReader(`{"model":"claude-sonnet-4-6","messages":[]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestPostMessages_EmptyMessages(t *testing.T) {
 	srv := newTestServer(t, "", nil)
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet-4","messages":[]}`))
+	resp, err := http.Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet-4-6","messages":[]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,10 +312,7 @@ func TestPostMessages_AuthError(t *testing.T) {
 	srv := newTCP4TestServer(t, s.Handler())
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}]}`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}]}`)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == 200 {
 		t.Fatal("expected non-200 when auth fails")
@@ -334,10 +331,7 @@ func TestPostMessages_NonStreaming(t *testing.T) {
 	srv := newTestServer(t, "", client)
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":false}`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
@@ -372,10 +366,7 @@ func TestPostMessages_Streaming(t *testing.T) {
 	srv := newTestServer(t, "", client)
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":true}`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
@@ -411,10 +402,7 @@ func TestPostMessages_InvalidState_PreStream(t *testing.T) {
 	srv := newTestServer(t, "", client)
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":true}`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 400 {
@@ -435,10 +423,7 @@ func TestPostMessages_InvalidState_MidStream(t *testing.T) {
 	srv := newTestServer(t, "", client)
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"stream":true}`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
@@ -459,10 +444,7 @@ func TestPostMessages_PayloadPassthrough(t *testing.T) {
 	srv := newTestServer(t, "", client)
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hello"}],"stream":false}`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	if capturedPayload == nil {

@@ -30,7 +30,13 @@ func newRealServer(t *testing.T) string {
 
 func postMessages(t *testing.T, baseURL, body string) *http.Response {
 	t.Helper()
-	resp, err := http.Post(baseURL+"/v1/messages", "application/json", strings.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/v1/messages", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Claude-Code-Session-Id", "test-session")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -34,7 +34,9 @@ func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 		thinking = true
 	}
 
-	payload, err := reqconv.BuildPayload(req, reqconv.BuildOptions{ProfileARN: profileARN, ModelID: kiroModel, Thinking: thinking, ThinkingBudget: 0, EnvState: s.envState})
+	ccSessionID := r.Header.Get(headerCCSessionID)
+
+	payload, err := reqconv.BuildPayload(req, reqconv.BuildOptions{ProfileARN: profileARN, ModelID: kiroModel, ConversationID: ccSessionID, Thinking: thinking, ThinkingBudget: 0, EnvState: s.envState})
 	if err != nil {
 		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 		return
