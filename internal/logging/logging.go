@@ -14,6 +14,7 @@ import (
 )
 
 type traceIDKey struct{}
+type sessionIDKey struct{}
 
 // NewTraceID generates a new UUID v4 trace ID.
 func NewTraceID() string {
@@ -38,6 +39,18 @@ func WithTraceID(ctx context.Context, id string) context.Context {
 // Returns "" if not set.
 func TraceIDFromContext(ctx context.Context) string {
 	id, _ := ctx.Value(traceIDKey{}).(string)
+	return id
+}
+
+// WithSessionID stores a session ID in the context.
+func WithSessionID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, sessionIDKey{}, id)
+}
+
+// SessionIDFromContext retrieves the session ID from the context.
+// Returns "" if not set.
+func SessionIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(sessionIDKey{}).(string)
 	return id
 }
 
