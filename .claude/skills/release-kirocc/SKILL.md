@@ -1,6 +1,7 @@
 ---
 name: release-kirocc
 description: "Guide the kirocc release process step by step: create release branch, write release notes, open PR, tag, and sync GitHub Release. Use this skill whenever the user wants to release a new version, cut a release, create a tag, bump version, or says /release-kirocc. Takes a version argument like /release-kirocc v0.1.0."
+disable-model-invocation: true
 ---
 
 # Release
