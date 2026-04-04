@@ -40,6 +40,11 @@ func (n *NonStreamingAccumulator) SetFilterToolName(name string) {
 	n.acc.FilterToolName = name
 }
 
+// SetToolNameMap sets the short→original tool name map for response remapping.
+func (n *NonStreamingAccumulator) SetToolNameMap(m map[string]string) {
+	n.acc.toolNameMap = m
+}
+
 // BuildResponse builds the final Anthropic response from accumulated events.
 func (n *NonStreamingAccumulator) BuildResponse(model string) (map[string]any, NonStreamingStats) {
 	return buildResponseFromAcc(&n.acc, model)

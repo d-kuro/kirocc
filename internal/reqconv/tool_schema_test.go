@@ -21,10 +21,7 @@ func TestConvertTools_Basic(t *testing.T) {
 			},
 		},
 	}
-	entries, err := ConvertTools(tools)
-	if err != nil {
-		t.Fatal(err)
-	}
+	entries := ConvertTools(tools, nil)
 	if len(entries) != 1 {
 		t.Fatalf("got %d entries", len(entries))
 	}
@@ -36,10 +33,7 @@ func TestConvertTools_Basic(t *testing.T) {
 
 func TestConvertTools_EmptyDescription(t *testing.T) {
 	tools := []anthropic.Tool{{Name: "my_tool", InputSchema: map[string]any{}}}
-	entries, err := ConvertTools(tools)
-	if err != nil {
-		t.Fatal(err)
-	}
+	entries := ConvertTools(tools, nil)
 	if entries[0].ToolSpecification.Description != "Tool: my_tool" {
 		t.Fatalf("got %q", entries[0].ToolSpecification.Description)
 	}
@@ -48,20 +42,26 @@ func TestConvertTools_EmptyDescription(t *testing.T) {
 func TestConvertTools_LongDescription(t *testing.T) {
 	longDesc := strings.Repeat("x", 50001)
 	tools := []anthropic.Tool{{Name: "Bash", Description: longDesc, InputSchema: map[string]any{}}}
-	entries, err := ConvertTools(tools)
-	if err != nil {
-		t.Fatal(err)
-	}
+	entries := ConvertTools(tools, nil)
 	if entries[0].ToolSpecification.Description != longDesc {
 		t.Fatal("long description should be kept as-is")
 	}
 }
 
-func TestConvertTools_NameTooLong(t *testing.T) {
-	tools := []anthropic.Tool{{Name: strings.Repeat("a", 65), InputSchema: map[string]any{}}}
-	_, err := ConvertTools(tools)
-	if err == nil {
-		t.Fatal("expected error for long name")
+func TestConvertTools_LongNameShortened(t *testing.T) {
+	longName := strings.Repeat("a", 65)
+	tools := []anthropic.Tool{{Name: longName, InputSchema: map[string]any{}}}
+	nameMap := NewToolNameMap()
+	entries := ConvertTools(tools, nameMap)
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries", len(entries))
+	}
+	short := entries[0].ToolSpecification.Name
+	if len(short) > maxToolNameLen {
+		t.Fatalf("shortened name still too long: %d chars", len(short))
+	}
+	if nameMap.Restore(short) != longName {
+		t.Fatal("reverse mapping failed")
 	}
 }
 

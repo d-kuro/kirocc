@@ -42,12 +42,13 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 	var cumulativeInputTokens, cumulativeOutputTokens int
 
 	for round := range maxToolSearchRounds {
-		payload, err := o.buildPayload(msgs)
+		payload, nameMap, err := o.buildPayload(msgs)
 		if err != nil {
 			slog.WarnContext(ctx, "tool search payload build error", "trace_id", short, "err", err)
 			writeStreamingOrJSONError(gw, sw, w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 			return ""
 		}
+		sw.SetToolNameMap(nameMap.ReverseMap())
 
 		apiResp, err := o.service.client.GenerateAssistantResponse(ctx, o.creds.AccessToken, payload, o.creds.Region)
 		if err != nil {
@@ -141,7 +142,7 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 			sw.WriteToolSearchResult(srvToolUseID, results)
 		}
 
-		msgs = o.appendSearchMessages(msgs, srvToolUseID, searchInput, results, searchErr)
+		msgs = o.appendSearchMessages(msgs, srvToolUseID, searchInput, results, searchErr, nameMap)
 	}
 
 	// Max rounds reached without normal completion.
@@ -165,7 +166,7 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 	var normalExit bool
 
 	for round := range maxToolSearchRounds {
-		payload, err := o.buildPayload(msgs)
+		payload, nameMap, err := o.buildPayload(msgs)
 		if err != nil {
 			WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 			return ""
@@ -180,6 +181,7 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 
 		acc := respconv.NewNonStreamingAccumulator(o.contextWindowSize, o.req.StopSequences, o.req.MaxTokens, 0)
 		acc.SetFilterToolName(toolsearch.KiroToolSearchName)
+		acc.SetToolNameMap(nameMap.ReverseMap())
 
 		var hasError bool
 		var foundToolSearch bool
@@ -260,7 +262,7 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 			})
 		}
 
-		msgs = o.appendSearchMessages(msgs, srvToolUseID, searchInput, results, searchErr)
+		msgs = o.appendSearchMessages(msgs, srvToolUseID, searchInput, results, searchErr, nameMap)
 	}
 
 	// Max rounds reached without normal completion.
@@ -309,16 +311,20 @@ func (o *toolSearchOrchestrator) executeSearch(ctx context.Context, short string
 
 // appendSearchMessages appends the server_tool_use + tool_result messages to the conversation.
 // On error, the tool_result contains the error message instead of tool references.
-func (o *toolSearchOrchestrator) appendSearchMessages(msgs []anthropic.Message, srvToolUseID string, searchInput map[string]any, results []string, searchErr error) []anthropic.Message {
+// Tool names in the result text are shortened via nameMap so Kiro sees consistent names.
+func (o *toolSearchOrchestrator) appendSearchMessages(msgs []anthropic.Message, srvToolUseID string, searchInput map[string]any, results []string, searchErr error, nameMap *reqconv.ToolNameMap) []anthropic.Message {
 	var resultContent anthropic.MessageContent
 	var isError bool
 	if searchErr != nil {
 		isError = true
 		resultContent = anthropic.MessageContent{Text: "tool search error: " + toolsearch.ErrorCode(searchErr)}
 	} else {
-		// Use text content so Kiro's tool_result conversion preserves the result.
-		// tool_reference blocks would be dropped by extractToolResultContentText.
-		resultContent = anthropic.MessageContent{Text: "Found tools: " + strings.Join(results, ", ")}
+		// Shorten tool names in the result text so Kiro sees names matching the tool schema.
+		shortened := make([]string, len(results))
+		for i, name := range results {
+			shortened[i] = nameMap.Shorten(name)
+		}
+		resultContent = anthropic.MessageContent{Text: "Found tools: " + strings.Join(shortened, ", ")}
 	}
 	return append(msgs,
 		anthropic.Message{
@@ -345,7 +351,7 @@ func buildSearchInput(query string, maxResults int) map[string]any {
 	return input
 }
 
-func (o *toolSearchOrchestrator) buildPayload(msgs []anthropic.Message) (*kiroproto.Payload, error) {
+func (o *toolSearchOrchestrator) buildPayload(msgs []anthropic.Message) (*kiroproto.Payload, *reqconv.ToolNameMap, error) {
 	tmpReq := *o.req
 	tmpReq.Messages = msgs
 	return reqconv.BuildPayload(&tmpReq, o.buildOpts)

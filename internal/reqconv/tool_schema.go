@@ -1,7 +1,6 @@
 package reqconv
 
 import (
-	"fmt"
 	"log/slog"
 	"maps"
 
@@ -9,9 +8,30 @@ import (
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 )
 
-const (
-	maxToolNameLen = 64
-)
+// ConvertTools converts Anthropic tool definitions to Kiro tool entries.
+// Names exceeding 64 characters are shortened via nameMap.
+func ConvertTools(tools []anthropic.Tool, nameMap *ToolNameMap) []kiroproto.ToolEntry {
+	var entries []kiroproto.ToolEntry
+
+	for _, t := range tools {
+		name := nameMap.Shorten(t.Name)
+
+		desc := t.Description
+		if desc == "" {
+			desc = "Tool: " + t.Name
+		}
+
+		entries = append(entries, kiroproto.ToolEntry{
+			ToolSpecification: &kiroproto.ToolSpecification{
+				Name:        name,
+				Description: desc,
+				InputSchema: kiroproto.InputSchema{JSON: SanitizeJSONSchema(t.InputSchema)},
+			},
+		})
+	}
+
+	return entries
+}
 
 // unsupportedKeywords lists JSON Schema keywords that Kiro API rejects.
 var unsupportedKeywords = map[string]struct{}{
@@ -74,32 +94,6 @@ func ThinkingToolEntry() kiroproto.ToolEntry {
 			},
 		},
 	}
-}
-
-// ConvertTools converts Anthropic tool definitions to Kiro tool entries.
-func ConvertTools(tools []anthropic.Tool) ([]kiroproto.ToolEntry, error) {
-	var entries []kiroproto.ToolEntry
-
-	for _, t := range tools {
-		if len(t.Name) > maxToolNameLen {
-			return nil, fmt.Errorf("tool name %q exceeds %d characters", t.Name, maxToolNameLen)
-		}
-
-		desc := t.Description
-		if desc == "" {
-			desc = "Tool: " + t.Name
-		}
-
-		entries = append(entries, kiroproto.ToolEntry{
-			ToolSpecification: &kiroproto.ToolSpecification{
-				Name:        t.Name,
-				Description: desc,
-				InputSchema: kiroproto.InputSchema{JSON: SanitizeJSONSchema(t.InputSchema)},
-			},
-		})
-	}
-
-	return entries, nil
 }
 
 // SanitizeJSONSchema recursively removes fields that Kiro API rejects.

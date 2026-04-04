@@ -395,7 +395,7 @@ func TestE2E_SchemaSanitization(t *testing.T) {
 	}
 }
 
-func TestE2E_ToolNameValidation(t *testing.T) {
+func TestE2E_ToolNameShortening(t *testing.T) {
 	p1 := mustJSON(map[string]string{"content": "ok"})
 	client := &capturingClient{events: []any{"assistantResponseEvent", p1}}
 
@@ -412,7 +412,16 @@ func TestE2E_ToolNameValidation(t *testing.T) {
 	resp := postMessages(t, srv.URL, reqBody)
 	defer func() { _ = resp.Body.Close() }()
 
-	requireStatus(t, resp, 400)
+	requireStatus(t, resp, 200)
+	requireCaptured(t, client)
+
+	tools := client.captured.ConversationState.CurrentMessage.UserInputMessage.UserInputMessageContext.Tools
+	if len(tools) == 0 {
+		t.Fatal("expected tools in payload")
+	}
+	if len(tools[0].ToolSpecification.Name) > 64 {
+		t.Fatalf("tool name should be shortened, got %d chars", len(tools[0].ToolSpecification.Name))
+	}
 }
 
 func TestE2E_MessageNormalization(t *testing.T) {

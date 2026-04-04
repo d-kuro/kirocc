@@ -153,7 +153,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, err := reqconv.BuildPayload(req, reqconv.BuildOptions{
+	payload, nameMap, err := reqconv.BuildPayload(req, reqconv.BuildOptions{
 		ProfileARN:     creds.ProfileARN,
 		ModelID:        kiroModel,
 		ConversationID: ccSessionID,
@@ -167,8 +167,9 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 		return
 	}
+	reverseMap := nameMap.ReverseMap()
 
-	retryReason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, contextWindowSize, thinking, 1)
+	retryReason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, contextWindowSize, thinking, 1, reverseMap)
 	if retryReason == "" {
 		return
 	}
@@ -184,7 +185,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		// Clear IDs to break out of stuck conversation state.
 		payload.ConversationState.ConversationID = ""
 		payload.ConversationState.AgentContinuationID = ""
-		reason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, contextWindowSize, thinking, 2)
+		reason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, contextWindowSize, thinking, 2, reverseMap)
 		if reason == "" {
 			return
 		}
@@ -208,7 +209,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	)
 	payload.ConversationState.ConversationID = ""
 	payload.ConversationState.AgentContinuationID = ""
-	if reason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, contextWindowSize, thinking, 2); reason != "" {
+	if reason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, contextWindowSize, thinking, 2, reverseMap); reason != "" {
 		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, "invalid state: "+reason)
 	}
 }
@@ -216,7 +217,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 // callAndHandle calls the Kiro API and handles the response.
 // Returns a non-empty reason string if the request failed with a retryable invalidStateEvent
 // before the stream started (i.e., no bytes written to w yet). Returns "" on success or non-retryable error.
-func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, payload *kiroproto.Payload, creds *auth.Credentials, model string, contextWindowSize int, thinking bool, attempt int) string {
+func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, payload *kiroproto.Payload, creds *auth.Credentials, model string, contextWindowSize int, thinking bool, attempt int, toolNameMap map[string]string) string {
 	_, short := logging.TraceIDs(ctx)
 	capture := newUpstreamAttemptCapture(ctx, payload, model, thinking, req.Stream, attempt)
 
@@ -235,9 +236,9 @@ func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, req 
 
 	var reason string
 	if req.Stream {
-		reason = s.handleStreamingResponse(ctx, w, apiResp, model, contextWindowSize, req.StopSequences, req.MaxTokens, apiResp.PromptTokens, capture)
+		reason = s.handleStreamingResponse(ctx, w, apiResp, model, contextWindowSize, req.StopSequences, req.MaxTokens, apiResp.PromptTokens, capture, toolNameMap)
 	} else {
-		reason = s.handleNonStreamingResponse(ctx, w, apiResp, model, contextWindowSize, req.StopSequences, req.MaxTokens, apiResp.PromptTokens, capture)
+		reason = s.handleNonStreamingResponse(ctx, w, apiResp, model, contextWindowSize, req.StopSequences, req.MaxTokens, apiResp.PromptTokens, capture, toolNameMap)
 	}
 	if reason == retryReasonEmptyVisibleEndTurn {
 		capture.logCapture(ctx, reason)
