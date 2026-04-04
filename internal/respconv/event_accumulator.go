@@ -81,6 +81,9 @@ type responseAccumulator struct {
 	// FilterToolName, when set, causes ProcessEvent to skip recording tool_use
 	// events with this name in HasToolUse/ToolCalls (used by tool search orchestrator).
 	FilterToolName string
+	// toolNameMap maps shortened tool names back to originals (short→original).
+	// When set, tool names from Kiro responses are restored before emitting to the client.
+	toolNameMap map[string]string
 }
 
 // newAccumulator creates a responseAccumulator with common initialization.
@@ -150,18 +153,23 @@ func (a *responseAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 
 	case kiroproto.EventToolUse:
 		if e.ToolStop && !a.LocalStop {
+			// Restore original tool name if shortened.
+			toolName := e.ToolName
+			if mapped, ok := a.toolNameMap[toolName]; ok {
+				toolName = mapped
+			}
 			// Skip recording filtered tools (e.g. internal ToolSearch).
 			if a.FilterToolName != "" && e.ToolName == a.FilterToolName {
 				d.ToolStop = true
 				d.ToolUseID = e.ToolUseID
-				d.ToolName = e.ToolName
+				d.ToolName = toolName
 				d.ToolInput = e.ToolInput
 				return d
 			}
 			a.HasToolUse = true
 			tc := ToolCall{
 				ID:    e.ToolUseID,
-				Name:  e.ToolName,
+				Name:  toolName,
 				Input: e.ToolInput,
 			}
 			if !jsontext.Value(tc.Input).IsValid() {
@@ -180,7 +188,7 @@ func (a *responseAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 			a.ToolCalls = append(a.ToolCalls, tc)
 			d.ToolStop = true
 			d.ToolUseID = e.ToolUseID
-			d.ToolName = e.ToolName
+			d.ToolName = toolName
 			d.ToolInput = e.ToolInput
 			if a.LocalStop {
 				d.StopSignal = true

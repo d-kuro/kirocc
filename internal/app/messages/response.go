@@ -15,12 +15,13 @@ import (
 
 const retryReasonEmptyVisibleEndTurn = "empty_visible_end_turn"
 
-func (s *Service) handleStreamingResponse(ctx context.Context, w http.ResponseWriter, apiResp *kiroclient.Response, model string, contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int, capture *upstreamAttemptCapture) string {
+func (s *Service) handleStreamingResponse(ctx context.Context, w http.ResponseWriter, apiResp *kiroclient.Response, model string, contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int, capture *upstreamAttemptCapture, toolNameMap map[string]string) string {
 	traceID, short := logging.TraceIDs(ctx)
 
 	gw := NewGateWriter(w)
 	sw := respconv.NewSSEWriter(ctx, gw, model, contextWindowSize, stopSequences, maxTokens, preCountedInputTokens)
 	sw.OnVisibleOutput = func() { gw.Promote() }
+	sw.SetToolNameMap(toolNameMap)
 
 	var streamErr bool
 	var localStop bool
@@ -118,9 +119,10 @@ func (s *Service) handleStreamingResponse(ctx context.Context, w http.ResponseWr
 	return ""
 }
 
-func (s *Service) handleNonStreamingResponse(ctx context.Context, w http.ResponseWriter, apiResp *kiroclient.Response, model string, contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int, capture *upstreamAttemptCapture) string {
+func (s *Service) handleNonStreamingResponse(ctx context.Context, w http.ResponseWriter, apiResp *kiroclient.Response, model string, contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int, capture *upstreamAttemptCapture, toolNameMap map[string]string) string {
 	traceID, short := logging.TraceIDs(ctx)
 	acc := respconv.NewNonStreamingAccumulator(contextWindowSize, stopSequences, maxTokens, preCountedInputTokens)
+	acc.SetToolNameMap(toolNameMap)
 
 	var invalidReason string
 	var hasError bool

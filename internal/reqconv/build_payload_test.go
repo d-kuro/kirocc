@@ -9,7 +9,7 @@ import (
 )
 
 func buildPayloadForTest(req *anthropic.Request, profileARN, modelID, conversationID string, thinking bool, thinkingBudget int, envState *kiroproto.EnvState) (*kiroproto.Payload, error) {
-	return BuildPayload(req, BuildOptions{
+	p, _, err := BuildPayload(req, BuildOptions{
 		ProfileARN:     profileARN,
 		ModelID:        modelID,
 		ConversationID: conversationID,
@@ -17,6 +17,7 @@ func buildPayloadForTest(req *anthropic.Request, profileARN, modelID, conversati
 		ThinkingBudget: thinkingBudget,
 		EnvState:       envState,
 	})
+	return p, err
 }
 
 func TestBuildPayload_SimpleMessage(t *testing.T) {
@@ -483,7 +484,7 @@ func TestBuildPayload_UsesProvidedConversationID(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
 		},
 	}
-	p, err := BuildPayload(req, BuildOptions{ModelID: "claude-sonnet-4.6", ConversationID: "session-abc-123"})
+	p, _, err := BuildPayload(req, BuildOptions{ModelID: "claude-sonnet-4.6", ConversationID: "session-abc-123"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +500,7 @@ func TestBuildPayload_EmptyConversationID(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
 		},
 	}
-	p, _ := BuildPayload(req, BuildOptions{ModelID: "claude-sonnet-4.6"})
+	p, _, _ := BuildPayload(req, BuildOptions{ModelID: "claude-sonnet-4.6"})
 	if p.ConversationState.ConversationID != "" {
 		t.Fatalf("got %q; want empty", p.ConversationState.ConversationID)
 	}

@@ -26,12 +26,11 @@ type BuildOptions struct {
 }
 
 // BuildPayload converts an Anthropic request into a Kiro API payload.
-func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payload, error) {
+func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payload, *ToolNameMap, error) {
+	nameMap := NewToolNameMap()
+
 	// 1. Build system prompt and convert tools.
-	systemPrompt, toolEntries, err := buildSystemAndTools(req, options.ToolSearchCtx)
-	if err != nil {
-		return nil, err
-	}
+	systemPrompt, toolEntries := buildSystemAndTools(req, options.ToolSearchCtx, nameMap)
 
 	// 2. Normalize and split messages.
 	hasTools := len(req.Tools) > 0
@@ -42,7 +41,7 @@ func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payl
 	historyMsgs, lastMsg := splitMessages(msgs)
 
 	// 3. Build history and place system prompt.
-	history := buildHistory(historyMsgs, options.EnvState)
+	history := buildHistory(historyMsgs, options.EnvState, nameMap)
 	history, lastContent := placeSystemPrompt(systemPrompt, history, ExtractTextContent(lastMsg.Content), options.EnvState)
 
 	// 4. Build currentMessage.
@@ -73,32 +72,24 @@ func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payl
 	if options.ProfileARN != "" {
 		payload.ProfileARN = options.ProfileARN
 	}
-	return payload, nil
+	return payload, nameMap, nil
 }
 
 // buildSystemAndTools extracts the system prompt and converts tools.
-func buildSystemAndTools(req *anthropic.Request, tsCtx *toolsearch.Context) (string, []kiroproto.ToolEntry, error) {
+func buildSystemAndTools(req *anthropic.Request, tsCtx *toolsearch.Context, nameMap *ToolNameMap) (string, []kiroproto.ToolEntry) {
 	systemPrompt := ExtractSystemPrompt(req.System)
 
 	var toolEntries []kiroproto.ToolEntry
 	if tsCtx != nil {
 		// Tool search mode: convert only active tools, inject ToolSearch tool.
-		var err error
-		toolEntries, err = ConvertTools(tsCtx.ActiveTools)
-		if err != nil {
-			return "", nil, err
-		}
+		toolEntries = ConvertTools(tsCtx.ActiveTools, nameMap)
 		toolEntries = ApplyToolCachePoints(tsCtx.ActiveTools, toolEntries)
 		toolEntries = append(toolEntries, toolsearch.KiroToolSearchEntry())
 	} else if len(req.Tools) > 0 {
-		var err error
-		toolEntries, err = ConvertTools(req.Tools)
-		if err != nil {
-			return "", nil, err
-		}
+		toolEntries = ConvertTools(req.Tools, nameMap)
 		toolEntries = ApplyToolCachePoints(req.Tools, toolEntries)
 	}
-	return systemPrompt, toolEntries, nil
+	return systemPrompt, toolEntries
 }
 
 // splitMessages splits normalized messages into history messages and the last message.
@@ -243,7 +234,7 @@ func extractToolUseIDs(msg anthropic.Message) []string {
 }
 
 // buildHistory converts normalized Anthropic messages to Kiro history entries.
-func buildHistory(msgs []anthropic.Message, envState *kiroproto.EnvState) []kiroproto.HistoryEntry {
+func buildHistory(msgs []anthropic.Message, envState *kiroproto.EnvState, nameMap *ToolNameMap) []kiroproto.HistoryEntry {
 	var history []kiroproto.HistoryEntry
 
 	for i, msg := range msgs {
@@ -278,6 +269,9 @@ func buildHistory(msgs []anthropic.Message, envState *kiroproto.EnvState) []kiro
 			// v3 captures show messageId must be stable across requests for the same
 			// assistant history entry. Using SHA1-based UUID ensures this.
 			allToolUses := ExtractToolUses(msg.Content)
+			for i := range allToolUses {
+				allToolUses[i].Name = nameMap.Shorten(allToolUses[i].Name)
+			}
 			var idSeedBuilder strings.Builder
 			idSeedBuilder.WriteString("assistant-msg:")
 			idSeedBuilder.WriteString(content)

@@ -329,12 +329,19 @@ func (s *SSEWriter) SetFilterToolName(name string) {
 	s.acc.FilterToolName = name
 }
 
+// SetToolNameMap sets the short→original tool name map for response remapping.
+func (s *SSEWriter) SetToolNameMap(m map[string]string) {
+	s.acc.toolNameMap = m
+}
+
 // ResetAccumulator replaces the internal accumulator with a fresh one,
 // preserving the SSEWriter's block index and started state for continuation.
 func (s *SSEWriter) ResetAccumulator(contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int) {
 	filterName := s.acc.FilterToolName
+	nameMap := s.acc.toolNameMap
 	s.acc = newAccumulator(contextWindowSize, stopSequences, maxTokens, preCountedInputTokens)
 	s.acc.FilterToolName = filterName
+	s.acc.toolNameMap = nameMap
 	s.activeType = ""
 }
 
