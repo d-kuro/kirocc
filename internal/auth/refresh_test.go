@@ -259,15 +259,13 @@ func TestAuthManager_ConcurrentAccess(t *testing.T) {
 	tokens := make([]string, goroutines)
 
 	for i := range goroutines {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
+		wg.Go(func() {
 			creds, err := mgr.GetToken(context.Background())
-			errors[idx] = err
+			errors[i] = err
 			if creds != nil {
-				tokens[idx] = creds.AccessToken
+				tokens[i] = creds.AccessToken
 			}
-		}(i)
+		})
 	}
 	wg.Wait()
 
