@@ -136,7 +136,7 @@ gh pr create --title "Release <version>" --body "$(cat <<'EOF'
 
 Release <version>
 
-See [docs/release-notes/<version>.md](docs/release-notes/<version>.md) for details.
+See [docs/release-notes/<version>.md](https://github.com/d-kuro/kirocc/blob/release/<version>/docs/release-notes/<version>.md) for details.
 EOF
 )"
 ```
