@@ -410,17 +410,6 @@ func (e *UpstreamError) Error() string {
 		e.Status, e.ContentType, e.Exception, e.Body)
 }
 
-// LogValue implements slog.LogValuer so that structured fields are
-// automatically expanded when an UpstreamError is logged via slog.
-func (e *UpstreamError) LogValue() slog.Value {
-	return slog.GroupValue(
-		slog.Int("status", e.Status),
-		slog.String("content_type", e.ContentType),
-		slog.String("exception", e.Exception),
-		slog.String("body", e.Body),
-	)
-}
-
 // normalizeAWSExceptionType strips namespace prefixes and hostname suffixes
 // from an AWS exception type string. AWS uses two formats:
 //   - JSON __type: "com.amazon.coral.service#ThrottlingException"

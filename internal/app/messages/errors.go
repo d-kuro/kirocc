@@ -1,9 +1,13 @@
 package messages
 
 import (
+	"context"
 	"encoding/json/v2"
+	"errors"
 	"log/slog"
 	"net/http"
+
+	"github.com/d-kuro/kirocc/internal/kiroclient"
 )
 
 // Anthropic API error type constants.
@@ -34,6 +38,23 @@ func handleUpstreamError(w http.ResponseWriter, isException bool, invalidReason 
 	}
 	WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, "invalid state: request rejected by upstream")
 	return ""
+}
+
+// logUpstreamError logs a "kiro api error" with structured attributes when the
+// error is an *UpstreamError. Falls back to plain err logging otherwise.
+func logUpstreamError(ctx context.Context, short string, err error, extra ...any) {
+	attrs := []any{"trace_id", short, "err", err}
+	attrs = append(attrs, extra...)
+	var ue *kiroclient.UpstreamError
+	if errors.As(err, &ue) {
+		attrs = append(attrs,
+			"status", ue.Status,
+			"content_type", ue.ContentType,
+			"exception", ue.Exception,
+			"body", ue.Body,
+		)
+	}
+	slog.ErrorContext(ctx, "kiro api error", attrs...)
 }
 
 // WriteErrorJSON writes an Anthropic-compatible JSON error response.
