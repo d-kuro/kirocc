@@ -288,10 +288,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 				c.recordError(ctx, ue)
 				return nil, ue
 			}
-			body := io.ReadCloser(resp.Body)
-			if idle := c.bodyReadIdleTimeout(); idle > 0 {
-				body = &idleReader{rc: resp.Body, idle: idle}
-			}
+			body := io.ReadCloser(&idleReader{rc: resp.Body, idle: c.bodyReadIdleTimeout()})
 			return &Response{
 				StatusCode:   resp.StatusCode,
 				Body:         body,
@@ -413,6 +410,17 @@ func (e *UpstreamError) Error() string {
 		e.Status, e.ContentType, e.Exception, e.Body)
 }
 
+// LogValue implements slog.LogValuer so that structured fields are
+// automatically expanded when an UpstreamError is logged via slog.
+func (e *UpstreamError) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.Int("status", e.Status),
+		slog.String("content_type", e.ContentType),
+		slog.String("exception", e.Exception),
+		slog.String("body", e.Body),
+	)
+}
+
 // normalizeAWSExceptionType strips namespace prefixes and hostname suffixes
 // from an AWS exception type string. AWS uses two formats:
 //   - JSON __type: "com.amazon.coral.service#ThrottlingException"
@@ -474,11 +482,6 @@ func readLimitedBody(body io.ReadCloser, n int64) string {
 	b, _ := io.ReadAll(io.LimitReader(body, n))
 	_ = body.Close()
 	return string(b)
-}
-
-// readErrorBody reads up to 1024 bytes from body and closes it.
-func readErrorBody(body io.ReadCloser) string {
-	return readLimitedBody(body, 1024)
 }
 
 const upstreamBodyLimit = 8192

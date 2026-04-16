@@ -264,9 +264,9 @@ func TestBackoffDelay_Values(t *testing.T) {
 	}
 }
 
-func TestReadErrorBody_Truncates(t *testing.T) {
+func TestReadLimitedBody_Truncates(t *testing.T) {
 	big := strings.Repeat("x", 2000)
-	got := readErrorBody(io.NopCloser(strings.NewReader(big)))
+	got := readLimitedBody(io.NopCloser(strings.NewReader(big)), 1024)
 	if len(got) > 1024 {
 		t.Fatalf("expected ≤1024 bytes, got %d", len(got))
 	}

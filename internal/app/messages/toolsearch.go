@@ -52,7 +52,7 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 
 		apiResp, err := o.service.client.GenerateAssistantResponse(ctx, o.creds.AccessToken, payload, o.creds.Region)
 		if err != nil {
-			logUpstreamError(ctx, short, err, "round", round+1)
+			slog.ErrorContext(ctx, "kiro api error", "trace_id", short, "round", round+1, "err", err)
 			writeStreamingOrJSONError(gw, sw, w, http.StatusBadGateway, errTypeAPI, "upstream API error")
 			return ""
 		}
@@ -174,7 +174,7 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 
 		apiResp, err := o.service.client.GenerateAssistantResponse(ctx, o.creds.AccessToken, payload, o.creds.Region)
 		if err != nil {
-			logUpstreamError(ctx, short, err, "round", round+1)
+			slog.ErrorContext(ctx, "kiro api error", "trace_id", short, "round", round+1, "err", err)
 			WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream API error")
 			return ""
 		}
