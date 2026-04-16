@@ -453,7 +453,7 @@ func TestE2E_EmptyVisibleEndTurn_NonStreaming_RetryAlsoFails(t *testing.T) {
 }
 
 func TestE2E_EmptyVisibleEndTurn_RetryClearsIDs(t *testing.T) {
-	// Verify that retry clears ConversationID and AgentContinuationID.
+	// Verify that retry clears ConversationID.
 	thinkingOnly := []any{
 		"assistantResponseEvent", mustJSON(map[string]string{"content": "<thinking>Let me think</thinking>"}),
 		"metadataEvent", mustJSON(map[string]any{
@@ -481,9 +481,6 @@ func TestE2E_EmptyVisibleEndTurn_RetryClearsIDs(t *testing.T) {
 	// so we verify the final state has cleared IDs.
 	if client.payloads[1].ConversationState.ConversationID != "" {
 		t.Fatalf("attempt-2 ConversationID should be empty, got %q", client.payloads[1].ConversationState.ConversationID)
-	}
-	if client.payloads[1].ConversationState.AgentContinuationID != "" {
-		t.Fatalf("attempt-2 AgentContinuationID should be empty, got %q", client.payloads[1].ConversationState.AgentContinuationID)
 	}
 }
 

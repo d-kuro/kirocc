@@ -126,7 +126,6 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 				ConversationID: ccSessionID,
 				Thinking:       thinking,
 				ThinkingBudget: thinkingBudget,
-				EnvState:       s.envState,
 				ToolSearchCtx:  tsCtx,
 			},
 			contextWindowSize: contextWindowSize,
@@ -159,7 +158,6 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		ConversationID: ccSessionID,
 		Thinking:       thinking,
 		ThinkingBudget: thinkingBudget,
-		EnvState:       s.envState,
 	})
 	if err != nil {
 		slog.WarnContext(r.Context(), "payload build error",
@@ -184,7 +182,6 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		)
 		// Clear IDs to break out of stuck conversation state.
 		payload.ConversationState.ConversationID = ""
-		payload.ConversationState.AgentContinuationID = ""
 		reason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, contextWindowSize, thinking, 2, reverseMap)
 		if reason == "" {
 			return
@@ -208,7 +205,6 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		"reason", retryReason,
 	)
 	payload.ConversationState.ConversationID = ""
-	payload.ConversationState.AgentContinuationID = ""
 	if reason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, contextWindowSize, thinking, 2, reverseMap); reason != "" {
 		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, "invalid state: "+reason)
 	}

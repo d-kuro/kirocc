@@ -8,14 +8,13 @@ import (
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 )
 
-func buildPayloadForTest(req *anthropic.Request, profileARN, modelID, conversationID string, thinking bool, thinkingBudget int, envState *kiroproto.EnvState) (*kiroproto.Payload, error) {
+func buildPayloadForTest(req *anthropic.Request, profileARN, modelID, conversationID string, thinking bool, thinkingBudget int) (*kiroproto.Payload, error) {
 	p, _, err := BuildPayload(req, BuildOptions{
 		ProfileARN:     profileARN,
 		ModelID:        modelID,
 		ConversationID: conversationID,
 		Thinking:       thinking,
 		ThinkingBudget: thinkingBudget,
-		EnvState:       envState,
 	})
 	return p, err
 }
@@ -27,7 +26,7 @@ func TestBuildPayload_SimpleMessage(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "arn:test", "claude-sonnet-4.6", "conv-test", false, 0, nil)
+	payload, err := buildPayloadForTest(req, "arn:test", "claude-sonnet-4.6", "conv-test", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,9 +49,6 @@ func TestBuildPayload_SimpleMessage(t *testing.T) {
 	if len(cs.History) != 0 {
 		t.Fatalf("history should be empty, got %d", len(cs.History))
 	}
-	if cs.AgentContinuationID == "" {
-		t.Fatal("agentContinuationId should always be set")
-	}
 }
 
 func TestBuildPayload_SystemPromptInHistory(t *testing.T) {
@@ -65,7 +61,7 @@ func TestBuildPayload_SystemPromptInHistory(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "How are you?"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0, nil)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +105,7 @@ func TestBuildPayload_SystemPromptNoHistory(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0, nil)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +133,7 @@ func TestBuildPayload_LastAssistant(t *testing.T) {
 			{Role: "assistant", Content: anthropic.MessageContent{Text: "Hi there"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0, nil)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +173,7 @@ func TestBuildPayload_ToolUseFlow(t *testing.T) {
 			},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0, nil)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,9 +194,6 @@ func TestBuildPayload_ToolUseFlow(t *testing.T) {
 	}
 	if cs.CurrentMessage.UserInputMessage.Content != "" {
 		t.Fatalf("currentMessage.content = %q, want empty", cs.CurrentMessage.UserInputMessage.Content)
-	}
-	if cs.AgentContinuationID == "" {
-		t.Fatal("agentContinuationId should be set for continuation request")
 	}
 	// History should have assistant with toolUses.
 	if len(cs.History) != 2 {
@@ -242,7 +235,7 @@ func TestBuildPayload_ThinkingXML_ToolResultOnly(t *testing.T) {
 			},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", true, 10000, nil)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", true, 10000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,52 +246,6 @@ func TestBuildPayload_ThinkingXML_ToolResultOnly(t *testing.T) {
 	}
 }
 
-func TestBuildPayload_AgentContinuationID_Deterministic(t *testing.T) {
-	req := &anthropic.Request{
-		Model: "claude-sonnet-4-6",
-		Tools: []anthropic.Tool{
-			{Name: "get_weather", Description: "Get weather", InputSchema: map[string]any{"type": "object"}},
-		},
-		Messages: []anthropic.Message{
-			{Role: "user", Content: anthropic.MessageContent{Text: "Weather?"}},
-			{
-				Role: "assistant",
-				Content: anthropic.MessageContent{
-					Blocks: []anthropic.ContentBlock{
-						{Type: "tool_use", ID: "toolu_01", Name: "get_weather", Input: map[string]any{"city": "Tokyo"}},
-					},
-				},
-			},
-			{
-				Role: "user",
-				Content: anthropic.MessageContent{
-					Blocks: []anthropic.ContentBlock{
-						{Type: "tool_result", ToolUseID: "toolu_01", Content: anthropic.MessageContent{Text: "Sunny"}},
-					},
-				},
-			},
-		},
-	}
-
-	p1, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p2, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	id1 := p1.ConversationState.AgentContinuationID
-	id2 := p2.ConversationState.AgentContinuationID
-	if id1 == "" || id2 == "" {
-		t.Fatalf("agentContinuationIds should be set, got %q / %q", id1, id2)
-	}
-	if id1 != id2 {
-		t.Fatalf("agentContinuationId should be deterministic: %q vs %q", id1, id2)
-	}
-}
-
 func TestBuildPayload_ThinkingMode(t *testing.T) {
 	req := &anthropic.Request{
 		Model: "claude-sonnet-4-6",
@@ -306,7 +253,7 @@ func TestBuildPayload_ThinkingMode(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "Think about this."}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", true, 0, nil)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +287,7 @@ func TestBuildPayload_ThinkingMode_NoThinking(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0, nil)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +309,7 @@ func TestBuildPayload_EmptyProfileARN(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0, nil)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +348,7 @@ func TestBuildPayload_ThinkingInHistory(t *testing.T) {
 			{Name: "bash", Description: "Run bash", InputSchema: map[string]any{"type": "object"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", true, 0, nil)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +402,7 @@ func TestBuildPayload_ThinkingPendingToCurrentMessage(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "Follow up"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", true, 0, nil)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,7 +500,7 @@ func TestBuildPayload_Doc09_FullExample(t *testing.T) {
 		},
 	}
 
-	payload, err := buildPayloadForTest(req, "arn:aws:codewhisperer:us-east-1:123456789:profile/example", "claude-sonnet-4.6", "conv-test", false, 0, nil)
+	payload, err := buildPayloadForTest(req, "arn:aws:codewhisperer:us-east-1:123456789:profile/example", "claude-sonnet-4.6", "conv-test", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,9 +513,6 @@ func TestBuildPayload_Doc09_FullExample(t *testing.T) {
 	// tool_result-only continuation should keep empty currentMessage.content.
 	if cs.CurrentMessage.UserInputMessage.Content != "" {
 		t.Fatalf("currentMessage.content = %q, want empty", cs.CurrentMessage.UserInputMessage.Content)
-	}
-	if cs.AgentContinuationID == "" {
-		t.Fatal("agentContinuationId should be set for tool-result continuation")
 	}
 	// Tool results
 	ctx := cs.CurrentMessage.UserInputMessage.UserInputMessageContext
@@ -629,34 +573,7 @@ func TestBuildPayload_Doc09_FullExample(t *testing.T) {
 	}
 }
 
-func TestBuildPayload_EnvStateInjected(t *testing.T) {
-	req := &anthropic.Request{
-		Model: "claude-sonnet-4-6",
-		Messages: []anthropic.Message{
-			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
-		},
-	}
-	envState := &kiroproto.EnvState{
-		OperatingSystem:         "linux",
-		CurrentWorkingDirectory: "/test/dir",
-	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0, envState)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := payload.ConversationState.CurrentMessage.UserInputMessage.UserInputMessageContext
-	if ctx == nil {
-		t.Fatal("expected UserInputMessageContext")
-	}
-	if ctx.EnvState != envState {
-		t.Fatal("envState not injected")
-	}
-	if ctx.EnvState.OperatingSystem != "linux" {
-		t.Fatalf("OS = %q, want linux", ctx.EnvState.OperatingSystem)
-	}
-}
-
-func TestBuildPayload_EnvStateInHistory(t *testing.T) {
+func TestBuildPayload_NoContextWhenNoToolsOrResults(t *testing.T) {
 	req := &anthropic.Request{
 		Model: "claude-sonnet-4-6",
 		Messages: []anthropic.Message{
@@ -665,43 +582,17 @@ func TestBuildPayload_EnvStateInHistory(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "How are you?"}},
 		},
 	}
-	envState := &kiroproto.EnvState{
-		OperatingSystem:         "macos",
-		CurrentWorkingDirectory: "/test",
-	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0, envState)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h0 := payload.ConversationState.History[0].UserInputMessage
-	if h0.UserInputMessageContext == nil {
-		t.Fatal("history user message should have UserInputMessageContext with envState")
-	}
-	if h0.UserInputMessageContext.EnvState != envState {
-		t.Fatal("history user message envState mismatch")
-	}
-}
-
-func TestBuildPayload_EnvStateNil(t *testing.T) {
-	req := &anthropic.Request{
-		Model: "claude-sonnet-4-6",
-		Messages: []anthropic.Message{
-			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
-			{Role: "assistant", Content: anthropic.MessageContent{Text: "Hi"}},
-			{Role: "user", Content: anthropic.MessageContent{Text: "How are you?"}},
-		},
-	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0, nil)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	h0 := payload.ConversationState.History[0].UserInputMessage
 	if h0.UserInputMessageContext != nil {
-		t.Fatal("history user message should not have UserInputMessageContext when envState is nil and no toolResults")
+		t.Fatal("history user message should not have UserInputMessageContext when no tools or toolResults")
 	}
 }
 
-func TestBuildPayload_EnvStateNilWithToolResults(t *testing.T) {
+func TestBuildPayload_ToolResultsInHistory(t *testing.T) {
 	req := &anthropic.Request{
 		Model: "claude-sonnet-4-6",
 		Tools: []anthropic.Tool{
@@ -723,20 +614,17 @@ func TestBuildPayload_EnvStateNilWithToolResults(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "Thanks"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0, nil)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// history[2] is the user message with tool_result — should have ToolResults but no EnvState.
+	// history[2] is the user message with tool_result — should have ToolResults.
 	h2 := payload.ConversationState.History[2].UserInputMessage
 	if h2 == nil {
 		t.Fatal("history[2] should be user message")
 	}
 	if h2.UserInputMessageContext == nil {
 		t.Fatal("history[2] should have UserInputMessageContext for toolResults")
-	}
-	if h2.UserInputMessageContext.EnvState != nil {
-		t.Fatal("envState should be nil when not provided")
 	}
 	if len(h2.UserInputMessageContext.ToolResults) != 1 {
 		t.Fatalf("toolResults len = %d, want 1", len(h2.UserInputMessageContext.ToolResults))
@@ -752,7 +640,7 @@ func TestBuildPayload_AssistantMessageID(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "How are you?"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0, nil)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -769,7 +657,7 @@ func TestPlaceSystemPrompt_InjectsIntoHistory(t *testing.T) {
 	history := []kiroproto.HistoryEntry{
 		{UserInputMessage: &kiroproto.HistoryUserInputMessage{Content: "hello"}},
 	}
-	newHistory, last := placeSystemPrompt("System", history, "current", &kiroproto.EnvState{OperatingSystem: "macos"})
+	newHistory, last := placeSystemPrompt("System", history, "current")
 	if last != "current" {
 		t.Fatalf("lastContent changed: %q", last)
 	}
@@ -783,6 +671,9 @@ func TestPlaceSystemPrompt_InjectsIntoHistory(t *testing.T) {
 	if newHistory[1].AssistantResponseMessage == nil || newHistory[1].AssistantResponseMessage.Content != syntheticAck {
 		t.Fatal("history[1] should be synthetic ack")
 	}
+	if newHistory[1].AssistantResponseMessage.MessageID == "" {
+		t.Fatal("synthetic ack should have a non-empty MessageID")
+	}
 	if newHistory[2].UserInputMessage.Content != "hello" {
 		t.Fatalf("history[2] = %q", newHistory[2].UserInputMessage.Content)
 	}
@@ -793,7 +684,7 @@ func TestPlaceSystemPrompt_InjectsIntoHistory(t *testing.T) {
 }
 
 func TestPlaceSystemPrompt_NoHistory(t *testing.T) {
-	newHistory, last := placeSystemPrompt("System", nil, "current", &kiroproto.EnvState{OperatingSystem: "macos"})
+	newHistory, last := placeSystemPrompt("System", nil, "current")
 	if last != "current" {
 		t.Fatalf("last = %q", last)
 	}
@@ -807,13 +698,16 @@ func TestPlaceSystemPrompt_NoHistory(t *testing.T) {
 	if newHistory[1].AssistantResponseMessage == nil || newHistory[1].AssistantResponseMessage.Content != syntheticAck {
 		t.Fatal("history[1] should be synthetic ack")
 	}
+	if newHistory[1].AssistantResponseMessage.MessageID == "" {
+		t.Fatal("synthetic ack should have a non-empty MessageID")
+	}
 }
 
 func TestPlaceSystemPrompt_EmptySystem(t *testing.T) {
 	history := []kiroproto.HistoryEntry{
 		{UserInputMessage: &kiroproto.HistoryUserInputMessage{Content: "hello"}},
 	}
-	newHistory, last := placeSystemPrompt("", history, "current", nil)
+	newHistory, last := placeSystemPrompt("", history, "current")
 	if last != "current" {
 		t.Fatalf("last = %q", last)
 	}

@@ -5,7 +5,6 @@ import (
 
 	"github.com/d-kuro/kirocc/internal/auth"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
-	"github.com/d-kuro/kirocc/internal/kiroproto"
 )
 
 // TokenGetter loads valid upstream credentials for a request.
@@ -15,16 +14,14 @@ type TokenGetter interface {
 
 // Service owns message execution and token counting flows.
 type Service struct {
-	auth     TokenGetter
-	client   kiroclient.Client
-	envState *kiroproto.EnvState
+	auth   TokenGetter
+	client kiroclient.Client
 }
 
 // New constructs a message service.
-func New(authMgr TokenGetter, client kiroclient.Client, envState *kiroproto.EnvState) *Service {
+func New(authMgr TokenGetter, client kiroclient.Client) *Service {
 	return &Service{
-		auth:     authMgr,
-		client:   client,
-		envState: envState,
+		auth:   authMgr,
+		client: client,
 	}
 }
