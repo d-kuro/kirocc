@@ -15,6 +15,7 @@ import (
 type Event struct {
 	Type         string // event type from header
 	Content      string // assistantResponseEvent → content field
+	ModelID      string // assistantResponseEvent → modelId field
 	ThinkingText string // reasoningContentEvent → text field
 	ToolName     string // toolUseEvent
 	ToolUseID    string
@@ -68,6 +69,7 @@ const (
 	EventInteractionComps   = "interactionComponentsEvent"
 	EventDryRunSucceed      = "dryRunSucceedEvent"
 	EventContextUsage       = "contextUsageEvent"
+	EventInitialResponse    = "initial-response"
 )
 
 // ParseStream reads AWS Event Stream binary frames from r and calls callback for each parsed Event.
@@ -120,11 +122,12 @@ func ParseStream(ctx context.Context, r io.Reader, callback func(Event) bool) er
 		case EventAssistantResponse:
 			var m struct {
 				Content string `json:"content"`
+				ModelID string `json:"modelId"`
 			}
 			if err := json.Unmarshal(payload, &m); err != nil {
 				return fmt.Errorf("decode %s: %w", eventType, err)
 			}
-			stop = callback(Event{Type: eventType, Content: m.Content})
+			stop = callback(Event{Type: eventType, Content: m.Content, ModelID: m.ModelID})
 
 		case EventReasoningContent:
 			var m struct {
@@ -238,7 +241,7 @@ func ParseStream(ctx context.Context, r io.Reader, callback func(Event) bool) er
 
 		case EventFollowupPrompt, EventCitation, EventCode, EventCodeReference,
 			EventSupplementaryLinks, EventIntents, EventInteractionComps,
-			EventDryRunSucceed:
+			EventDryRunSucceed, EventInitialResponse:
 			// Known no-op events — silently ignore.
 
 		default:

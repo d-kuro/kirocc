@@ -66,7 +66,7 @@ func TestHTTPClient_CorrectHeaders(t *testing.T) {
 		if r.Header.Get("X-Amz-Target") != "AmazonCodeWhispererStreamingService.GenerateAssistantResponse" {
 			t.Errorf("wrong X-Amz-Target: %q", r.Header.Get("X-Amz-Target"))
 		}
-		if r.Header.Get("Accept") != "application/vnd.amazon.eventstream" {
+		if r.Header.Get("Accept") != "*/*" {
 			t.Errorf("wrong Accept: %q", r.Header.Get("Accept"))
 		}
 		w.WriteHeader(http.StatusOK)
@@ -219,7 +219,7 @@ func TestHTTPClient_EndpointURL(t *testing.T) {
 		region  string
 		want    string
 	}{
-		{"region-based", "", "us-west-2", "https://q.us-west-2.amazonaws.com/generateAssistantResponse"},
+		{"region-based", "", "us-west-2", "https://q.us-west-2.amazonaws.com/"},
 		{"override", "http://localhost:8080", "us-west-2", "http://localhost:8080"},
 	}
 	for _, tt := range tests {

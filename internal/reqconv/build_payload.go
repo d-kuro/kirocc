@@ -21,7 +21,6 @@ type BuildOptions struct {
 	ConversationID string
 	Thinking       bool
 	ThinkingBudget int
-	EnvState       *kiroproto.EnvState
 	ToolSearchCtx  *toolsearch.Context
 }
 
@@ -41,8 +40,8 @@ func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payl
 	historyMsgs, lastMsg := splitMessages(msgs)
 
 	// 3. Build history and place system prompt.
-	history := buildHistory(historyMsgs, options.EnvState, nameMap)
-	history, lastContent := placeSystemPrompt(systemPrompt, history, ExtractTextContent(lastMsg.Content), options.EnvState)
+	history := buildHistory(historyMsgs, nameMap)
+	history, lastContent := placeSystemPrompt(systemPrompt, history, ExtractTextContent(lastMsg.Content))
 
 	// 4. Build currentMessage.
 	// Extract tool_use IDs from the preceding assistant message for reordering tool results.
@@ -50,14 +49,11 @@ func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payl
 	if len(historyMsgs) > 0 {
 		precedingToolUseIDs = extractToolUseIDs(historyMsgs[len(historyMsgs)-1])
 	}
-	userInputMessage := buildCurrentMessage(lastMsg, lastContent, options.ModelID, toolEntries, options.Thinking, options.ThinkingBudget, options.EnvState, precedingToolUseIDs)
+	userInputMessage := buildCurrentMessage(lastMsg, lastContent, options.ModelID, toolEntries, options.Thinking, options.ThinkingBudget, precedingToolUseIDs)
 
 	// 5. Apply cache points.
 	ApplySystemCachePoints(req.System, history, &userInputMessage)
 
-	// Find the last user-initiated message content (not tool-result continuations)
-	// to make agentContinuationID change per utterance but stable for continuations.
-	lastUserContent := findLastUserUtterance(msgs)
 	convState := kiroproto.ConversationState{
 		ConversationID:  options.ConversationID,
 		ChatTriggerType: kiroproto.ChatTriggerTypeManual,
@@ -67,7 +63,6 @@ func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payl
 	if len(history) > 0 {
 		convState.History = history
 	}
-	convState.AgentContinuationID = buildAgentContinuationID(options.ConversationID, lastUserContent)
 	payload := &kiroproto.Payload{ConversationState: convState}
 	if options.ProfileARN != "" {
 		payload.ProfileARN = options.ProfileARN
@@ -113,26 +108,26 @@ func splitMessages(msgs []anthropic.Message) (history []anthropic.Message, last 
 // in every request.
 const syntheticAck = "I will fully incorporate this information when generating my responses, and explicitly acknowledge relevant parts of the summary when answering questions."
 
+// syntheticAckMessageID is a deterministic UUID for the synthetic ack, computed once since the input is constant.
+var syntheticAckMessageID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("synthetic-ack:"+syntheticAck)).String()
+
 // placeSystemPrompt inserts the system prompt as a dedicated history entry pair
 // (user message + synthetic assistant ack), matching the v2 kiro-cli structure.
 // v2 captures show this pair is present in every request, even the first one.
 // Returns a new history slice (original is not mutated) and the updated lastContent.
-func placeSystemPrompt(systemPrompt string, history []kiroproto.HistoryEntry, lastContent string, envState *kiroproto.EnvState) ([]kiroproto.HistoryEntry, string) {
+func placeSystemPrompt(systemPrompt string, history []kiroproto.HistoryEntry, lastContent string) ([]kiroproto.HistoryEntry, string) {
 	if systemPrompt == "" {
 		return history, lastContent
 	}
 	// Always build the system prompt pair: user message + synthetic assistant ack.
-	// v2 captures show envState is present on ALL user messages, including the system prompt entry.
 	systemPair := []kiroproto.HistoryEntry{
 		{UserInputMessage: &kiroproto.HistoryUserInputMessage{
 			Content: systemPrompt,
 			Origin:  kiroproto.OriginKiroCLI,
-			UserInputMessageContext: &kiroproto.UserInputMessageContext{
-				EnvState: envState,
-			},
 		}},
 		{AssistantResponseMessage: &kiroproto.AssistantResponseMessage{
-			Content: syntheticAck,
+			MessageID: syntheticAckMessageID,
+			Content:   syntheticAck,
 		}},
 	}
 	newHistory := make([]kiroproto.HistoryEntry, 0, len(systemPair)+len(history))
@@ -142,26 +137,26 @@ func placeSystemPrompt(systemPrompt string, history []kiroproto.HistoryEntry, la
 }
 
 // buildCurrentMessage constructs the Kiro UserInputMessage from the last Anthropic message.
-func buildCurrentMessage(lastMsg anthropic.Message, lastContent, modelID string, toolEntries []kiroproto.ToolEntry, thinking bool, thinkingBudget int, envState *kiroproto.EnvState, precedingToolUseIDs []string) kiroproto.UserInputMessage {
+func buildCurrentMessage(lastMsg anthropic.Message, lastContent, modelID string, toolEntries []kiroproto.ToolEntry, thinking bool, thinkingBudget int, precedingToolUseIDs []string) kiroproto.UserInputMessage {
 	msg := kiroproto.UserInputMessage{
 		Content: lastContent,
 		ModelID: modelID,
 		Origin:  kiroproto.OriginKiroCLI,
 	}
 
-	// Add tools, tool results, and env state to context.
+	// Add tools and tool results to context.
 	toolResults := ExtractToolResults(lastMsg.Content)
 	toolResults = ReorderToolResults(toolResults, precedingToolUseIDs)
-	ctx := &kiroproto.UserInputMessageContext{
-		EnvState: envState,
+	if len(toolEntries) > 0 || len(toolResults) > 0 {
+		ctx := &kiroproto.UserInputMessageContext{}
+		if len(toolEntries) > 0 {
+			ctx.Tools = toolEntries
+		}
+		if len(toolResults) > 0 {
+			ctx.ToolResults = toolResults
+		}
+		msg.UserInputMessageContext = ctx
 	}
-	if len(toolEntries) > 0 {
-		ctx.Tools = toolEntries
-	}
-	if len(toolResults) > 0 {
-		ctx.ToolResults = toolResults
-	}
-	msg.UserInputMessageContext = ctx
 
 	// Match the observed kiro-cli continuation shape:
 	// tool-result-only turns keep empty currentMessage.content instead of "Continue".
@@ -193,32 +188,6 @@ func buildCurrentMessage(lastMsg anthropic.Message, lastContent, modelID string,
 	return msg
 }
 
-// buildAgentContinuationID generates a deterministic agent continuation ID.
-// v2 captures show this changes per user utterance but stays the same for
-// tool-result continuations within the same utterance.
-func buildAgentContinuationID(conversationID, lastUserContent string) string {
-	if conversationID == "" {
-		return ""
-	}
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("agent-continuation:"+conversationID+":"+lastUserContent)).String()
-}
-
-// findLastUserUtterance returns the text content of the last user message that
-// is a real utterance (has non-empty text content, not a tool-result-only continuation).
-// This is used to make agentContinuationID change per utterance but stay stable
-// for tool-result continuations within the same utterance.
-func findLastUserUtterance(msgs []anthropic.Message) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "user" {
-			text := ExtractTextContent(msgs[i].Content)
-			if text != "" {
-				return text
-			}
-		}
-	}
-	return ""
-}
-
 // extractToolUseIDs returns the IDs of all tool_use blocks in a message's content.
 func extractToolUseIDs(msg anthropic.Message) []string {
 	if msg.Content.IsString() {
@@ -234,7 +203,7 @@ func extractToolUseIDs(msg anthropic.Message) []string {
 }
 
 // buildHistory converts normalized Anthropic messages to Kiro history entries.
-func buildHistory(msgs []anthropic.Message, envState *kiroproto.EnvState, nameMap *ToolNameMap) []kiroproto.HistoryEntry {
+func buildHistory(msgs []anthropic.Message, nameMap *ToolNameMap) []kiroproto.HistoryEntry {
 	var history []kiroproto.HistoryEntry
 
 	for i, msg := range msgs {
@@ -254,12 +223,10 @@ func buildHistory(msgs []anthropic.Message, envState *kiroproto.EnvState, nameMa
 			if len(toolResults) > 1 && i > 0 && msgs[i-1].Role == "assistant" {
 				toolResults = ReorderToolResults(toolResults, extractToolUseIDs(msgs[i-1]))
 			}
-			if envState != nil || len(toolResults) > 0 {
-				ctx := &kiroproto.UserInputMessageContext{EnvState: envState}
-				if len(toolResults) > 0 {
-					ctx.ToolResults = toolResults
+			if len(toolResults) > 0 {
+				userMsg.UserInputMessageContext = &kiroproto.UserInputMessageContext{
+					ToolResults: toolResults,
 				}
-				userMsg.UserInputMessageContext = ctx
 			}
 			history = append(history, kiroproto.HistoryEntry{UserInputMessage: userMsg})
 

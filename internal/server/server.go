@@ -2,12 +2,9 @@ package server
 
 import (
 	"net/http"
-	"os"
-	"runtime"
 
 	messagesapp "github.com/d-kuro/kirocc/internal/app/messages"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
-	"github.com/d-kuro/kirocc/internal/kiroproto"
 	"github.com/d-kuro/kirocc/internal/tracing"
 )
 
@@ -33,20 +30,10 @@ type Server struct {
 
 // New creates a new Server.
 func New(authMgr messagesapp.TokenGetter, apiKey string, client kiroclient.Client, opts ...ServerOption) *Server {
-	cwd, _ := os.Getwd()
-	osName := runtime.GOOS
-	if osName == "darwin" {
-		osName = "macos"
-	}
-
-	envState := &kiroproto.EnvState{
-		OperatingSystem:         osName,
-		CurrentWorkingDirectory: cwd,
-	}
 	s := &Server{
 		apiKey:   apiKey,
 		mux:      http.NewServeMux(),
-		messages: messagesapp.New(authMgr, client, envState),
+		messages: messagesapp.New(authMgr, client),
 	}
 	for _, opt := range opts {
 		opt(s)

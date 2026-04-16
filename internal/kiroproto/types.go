@@ -23,12 +23,11 @@ type Payload struct {
 
 // ConversationState holds the conversation context for the Kiro API.
 type ConversationState struct {
-	ConversationID      string         `json:"conversationId,omitempty"`
-	AgentContinuationID string         `json:"agentContinuationId,omitempty"`
-	ChatTriggerType     string         `json:"chatTriggerType"`
-	AgentTaskType       string         `json:"agentTaskType"`
-	CurrentMessage      CurrentMessage `json:"currentMessage,omitzero"`
-	History             []HistoryEntry `json:"history,omitempty"`
+	ConversationID  string         `json:"conversationId,omitempty"`
+	ChatTriggerType string         `json:"chatTriggerType"`
+	AgentTaskType   string         `json:"agentTaskType"`
+	CurrentMessage  CurrentMessage `json:"currentMessage,omitzero"`
+	History         []HistoryEntry `json:"history,omitempty"`
 }
 
 // CurrentMessage wraps the current user input message.
@@ -46,15 +45,8 @@ type UserInputMessage struct {
 	CachePoint              *CachePoint              `json:"cachePoint,omitempty"`
 }
 
-// EnvState holds environment context sent with each request.
-type EnvState struct {
-	OperatingSystem         string `json:"operatingSystem,omitempty"`
-	CurrentWorkingDirectory string `json:"currentWorkingDirectory,omitempty"`
-}
-
-// UserInputMessageContext holds tools, tool results, and environment state.
+// UserInputMessageContext holds tools and tool results.
 type UserInputMessageContext struct {
-	EnvState    *EnvState    `json:"envState,omitempty"`
 	Tools       []ToolEntry  `json:"tools,omitempty"`
 	ToolResults []ToolResult `json:"toolResults,omitempty"`
 }

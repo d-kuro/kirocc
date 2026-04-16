@@ -55,19 +55,18 @@ type upstreamCapturedEvent struct {
 }
 
 type upstreamAttemptCapture struct {
-	traceID             string
-	attempt             int
-	model               string
-	thinking            bool
-	stream              bool
-	conversationID      string
-	agentContinuationID string
-	currentContentLen   int
-	toolCount           int
-	toolResultCount     int
-	requestBody         []byte
-	responseHeader      http.Header
-	events              []upstreamCapturedEvent
+	traceID           string
+	attempt           int
+	model             string
+	thinking          bool
+	stream            bool
+	conversationID    string
+	currentContentLen int
+	toolCount         int
+	toolResultCount   int
+	requestBody       []byte
+	responseHeader    http.Header
+	events            []upstreamCapturedEvent
 
 	assistantResponseEvents int
 	reasoningEvents         int
@@ -94,7 +93,6 @@ func newUpstreamAttemptCapture(ctx context.Context, payload *kiroproto.Payload, 
 	}
 
 	current := payload.ConversationState.CurrentMessage.UserInputMessage
-	agentContinuationID := payload.ConversationState.AgentContinuationID
 	currentContentLen := len(current.Content)
 	var toolCount int
 	var toolResultCount int
@@ -103,18 +101,17 @@ func newUpstreamAttemptCapture(ctx context.Context, payload *kiroproto.Payload, 
 		toolResultCount = len(current.UserInputMessageContext.ToolResults)
 	}
 	return &upstreamAttemptCapture{
-		traceID:             traceID,
-		attempt:             attempt,
-		model:               model,
-		thinking:            thinking,
-		stream:              stream,
-		conversationID:      payload.ConversationState.ConversationID,
-		agentContinuationID: agentContinuationID,
-		currentContentLen:   currentContentLen,
-		toolCount:           toolCount,
-		toolResultCount:     toolResultCount,
-		requestBody:         body,
-		toolUseNames:        make(map[string]int),
+		traceID:           traceID,
+		attempt:           attempt,
+		model:             model,
+		thinking:          thinking,
+		stream:            stream,
+		conversationID:    payload.ConversationState.ConversationID,
+		currentContentLen: currentContentLen,
+		toolCount:         toolCount,
+		toolResultCount:   toolResultCount,
+		requestBody:       body,
+		toolUseNames:      make(map[string]int),
 	}
 }
 
@@ -196,7 +193,6 @@ func (c *upstreamAttemptCapture) logAttrs() []any {
 	}
 	return []any{
 		"assistant_response_events", c.assistantResponseEvents,
-		"agent_continuation_id", c.agentContinuationID,
 		"current_content_len", c.currentContentLen,
 		"tool_count", c.toolCount,
 		"tool_result_count", c.toolResultCount,

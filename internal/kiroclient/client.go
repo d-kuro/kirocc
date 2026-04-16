@@ -25,8 +25,8 @@ const (
 	maxRetries     = 3
 	baseRetryDelay = 1 * time.Second
 
-	userAgentValue    = "aws-sdk-rust/1.3.12 ua/2.1 api/codewhispererstreaming/0.1.13922 os/macos lang/rust/1.92.0 md/appVersion-1.26.2 app/AmazonQ-For-CLI"
-	amzUserAgentValue = "aws-sdk-rust/1.3.12 ua/2.1 api/codewhispererstreaming/0.1.13922 os/macos lang/rust/1.92.0 m/F app/AmazonQ-For-CLI"
+	userAgentValue    = "aws-sdk-rust/1.3.14 ua/2.1 api/codewhispererstreaming/0.1.14474 os/macos lang/rust/1.92.0 md/appVersion-2.0.0 app/AmazonQ-For-CLI"
+	amzUserAgentValue = "aws-sdk-rust/1.3.14 ua/2.1 api/codewhispererstreaming/0.1.14474 os/macos lang/rust/1.92.0 m/F app/AmazonQ-For-CLI"
 )
 
 // Client is the interface for calling the Kiro API.
@@ -112,7 +112,7 @@ func (c *HTTPClient) endpointURL(region string) string {
 	if c.baseURL != "" {
 		return c.baseURL
 	}
-	return fmt.Sprintf("https://q.%s.amazonaws.com/generateAssistantResponse", region)
+	return fmt.Sprintf("https://q.%s.amazonaws.com/", region)
 }
 
 // GenerateAssistantResponse sends a request to the Kiro API with retry logic.
@@ -156,7 +156,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 
 		req.Header.Set("Authorization", "Bearer "+currentToken)
 		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
-		req.Header.Set("Accept", "application/vnd.amazon.eventstream")
+		req.Header.Set("Accept", "*/*")
 		req.Header.Set("X-Amz-Target", amzTarget)
 		req.Header.Set("User-Agent", userAgentValue)
 		req.Header.Set("x-amz-user-agent", amzUserAgentValue)
