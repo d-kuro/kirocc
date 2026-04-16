@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -46,6 +47,13 @@ type Response struct {
 // TokenRefresher is called when a 403 is received to get a fresh token.
 type TokenRefresher func(ctx context.Context) (newToken string, err error)
 
+// ErrBodyReadIdle is returned when the Kiro response body has not produced
+// any data within the configured idle timeout. This guards against silent
+// hangs where the server sends eventstream headers but never delivers frames.
+var ErrBodyReadIdle = errors.New("kiroclient: body read idle timeout")
+
+const defaultBodyReadIdleTimeout = 180 * time.Second
+
 // HTTPClient is the production implementation of Client.
 type HTTPClient struct {
 	httpClient     *http.Client
@@ -54,6 +62,7 @@ type HTTPClient struct {
 	otelBodyLimit  int
 	tokenRefresher TokenRefresher
 	countTokens    func([]byte) (int, error) // nil = skip token counting
+	bodyReadIdle   time.Duration             // idle timeout for response body reads; 0 = use default
 }
 
 // HTTPClientOption configures an HTTPClient.
@@ -72,6 +81,17 @@ func WithTokenRefresher(fn TokenRefresher) HTTPClientOption {
 // WithTokenCounter sets a function to count prompt tokens from the serialized payload.
 func WithTokenCounter(fn func([]byte) (int, error)) HTTPClientOption {
 	return func(c *HTTPClient) { c.countTokens = fn }
+}
+
+// WithBodyReadIdleTimeout sets the idle read deadline applied to the
+// response body of a successful 200 eventstream response. If no byte is
+// read within the given duration, the body Read returns ErrBodyReadIdle.
+//
+// NOTE: The idle reader calls Close() to unblock a pending Read. This is
+// guaranteed to work for net/http.Response.Body but is NOT a general
+// guarantee for arbitrary io.ReadCloser implementations.
+func WithBodyReadIdleTimeout(d time.Duration) HTTPClientOption {
+	return func(c *HTTPClient) { c.bodyReadIdle = d }
 }
 
 // WithOTel enables OpenTelemetry tracing on outgoing requests.
@@ -102,6 +122,47 @@ func NewHTTPClient(opts ...HTTPClientOption) *HTTPClient {
 	c.httpClient = &http.Client{Transport: rt}
 	return c
 }
+
+func (c *HTTPClient) bodyReadIdleTimeout() time.Duration {
+	if c.bodyReadIdle > 0 {
+		return c.bodyReadIdle
+	}
+	return defaultBodyReadIdleTimeout
+}
+
+// idleReader wraps an io.ReadCloser and enforces an idle timeout per Read call.
+// If no data is read within the configured duration, Read returns ErrBodyReadIdle.
+//
+// The timeout recovery works by calling Close on the underlying reader, which
+// is guaranteed to unblock a pending Read for net/http.Response.Body. This is
+// NOT a general guarantee for arbitrary io.ReadCloser implementations.
+type idleReader struct {
+	rc   io.ReadCloser
+	idle time.Duration
+}
+
+func (r *idleReader) Read(p []byte) (int, error) {
+	type result struct {
+		n   int
+		err error
+	}
+	ch := make(chan result, 1) // buffered: sender never blocks even if we time out
+	go func() {
+		n, err := r.rc.Read(p)
+		ch <- result{n, err}
+	}()
+	t := time.NewTimer(r.idle)
+	defer t.Stop()
+	select {
+	case res := <-ch:
+		return res.n, res.err
+	case <-t.C:
+		_ = r.rc.Close() // forces the pending Read to unblock (net/http guarantee)
+		return 0, ErrBodyReadIdle
+	}
+}
+
+func (r *idleReader) Close() error { return r.rc.Close() }
 
 func (c *HTTPClient) recordError(ctx context.Context, err error) {
 	if c.otel {
@@ -227,9 +288,13 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 				c.recordError(ctx, ue)
 				return nil, ue
 			}
+			body := io.ReadCloser(resp.Body)
+			if idle := c.bodyReadIdleTimeout(); idle > 0 {
+				body = &idleReader{rc: resp.Body, idle: idle}
+			}
 			return &Response{
 				StatusCode:   resp.StatusCode,
-				Body:         resp.Body,
+				Body:         body,
 				Header:       resp.Header,
 				PromptTokens: promptTokens,
 			}, nil

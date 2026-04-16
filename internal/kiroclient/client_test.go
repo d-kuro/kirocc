@@ -517,6 +517,47 @@ func TestUpstreamError_XAmznErrorTypeHeader(t *testing.T) {
 	}
 }
 
+// TestHTTPClient_BodyReadIdleTimeout verifies that when the Kiro API returns
+// 200 with eventstream headers but then stops sending data, the idle watchdog
+// fires and surfaces an error through ParseStream.
+func TestHTTPClient_BodyReadIdleTimeout(t *testing.T) {
+	srv := newTCP4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+		w.WriteHeader(http.StatusOK)
+		// Flush headers, then hang — never send body bytes.
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-r.Context().Done() // hold connection until test client disconnects
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(
+		WithBaseURL(srv.URL),
+		WithBodyReadIdleTimeout(50*time.Millisecond),
+	)
+	payload := &kiroproto.Payload{ConversationState: kiroproto.ConversationState{AgentTaskType: "vibe", ChatTriggerType: "MANUAL", CurrentMessage: kiroproto.CurrentMessage{UserInputMessage: kiroproto.UserInputMessage{Content: "Hi"}}}}
+	resp, err := c.GenerateAssistantResponse(context.Background(), "tok", payload, "us-east-1")
+	if err != nil {
+		t.Fatalf("GenerateAssistantResponse should succeed (200), got error: %v", err)
+	}
+
+	// Feed the body through ParseStream — the real production path.
+	// ParseStream uses bufio.Reader + io.ReadFull internally.
+	parseErr := kiroproto.ParseStream(context.Background(), resp.Body, func(e kiroproto.Event) bool {
+		t.Errorf("unexpected event: %+v", e)
+		return true
+	})
+	_ = resp.Body.Close()
+
+	if parseErr == nil {
+		t.Fatal("expected ParseStream to fail with idle timeout, got nil")
+	}
+	if !errors.Is(parseErr, ErrBodyReadIdle) {
+		t.Fatalf("expected ErrBodyReadIdle, got: %v", parseErr)
+	}
+}
+
 func TestNormalizeAWSExceptionType(t *testing.T) {
 	cases := []struct {
 		name string
