@@ -312,7 +312,7 @@ func (a *responseAccumulator) applyStopSequenceFilter(delta string) string {
 	}
 	// Find the byte offset after (runeCount - stopSeqMaxKeep) runes.
 	splitAt := 0
-	for i := 0; i < runeCount-a.stopSeqMaxKeep; i++ {
+	for range runeCount - a.stopSeqMaxKeep {
 		_, size := utf8.DecodeRuneInString(a.stopSeqPending[splitAt:])
 		splitAt += size
 	}

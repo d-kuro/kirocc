@@ -3,6 +3,7 @@ package kiroclient
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -32,6 +33,7 @@ func TestHTTPClient_Success(t *testing.T) {
 		if r.Header.Get("Content-Type") != "application/x-amz-json-1.0" {
 			t.Errorf("Content-Type = %q", r.Header.Get("Content-Type"))
 		}
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("stream-body"))
 	}))
@@ -69,6 +71,7 @@ func TestHTTPClient_CorrectHeaders(t *testing.T) {
 		if r.Header.Get("Accept") != "*/*" {
 			t.Errorf("wrong Accept: %q", r.Header.Get("Accept"))
 		}
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -86,6 +89,7 @@ func TestHTTPClient_PayloadSerialization(t *testing.T) {
 	var captured []byte
 	srv := newTCP4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		captured, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -126,6 +130,7 @@ func TestHTTPClient_Retry403_WithRefresh(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer new-token" {
 			t.Errorf("expected new token, got %q", r.Header.Get("Authorization"))
 		}
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -157,6 +162,7 @@ func TestHTTPClient_Retry429(t *testing.T) {
 			_, _ = w.Write([]byte("rate limited"))
 			return
 		}
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -258,9 +264,9 @@ func TestBackoffDelay_Values(t *testing.T) {
 	}
 }
 
-func TestReadErrorBody_Truncates(t *testing.T) {
+func TestReadLimitedBody_Truncates(t *testing.T) {
 	big := strings.Repeat("x", 2000)
-	got := readErrorBody(io.NopCloser(strings.NewReader(big)))
+	got := readLimitedBody(io.NopCloser(strings.NewReader(big)), 1024)
 	if len(got) > 1024 {
 		t.Fatalf("expected ≤1024 bytes, got %d", len(got))
 	}
@@ -291,6 +297,286 @@ func TestHTTPClient_ContextTimeout(t *testing.T) {
 	_, err := c.GenerateAssistantResponse(ctx, "tok", payload, "us-east-1")
 	if err == nil {
 		t.Fatal("expected error from context timeout")
+	}
+}
+
+// TestHTTPClient_NonEventStreamContentType verifies that a 200 response with a
+// non-eventstream Content-Type (e.g. application/json error envelope returned
+// by Kiro under throttling or internal errors) is surfaced as an error instead
+// of being passed to the frame parser, which would otherwise fail with a
+// confusing "reading prelude" message.
+func TestHTTPClient_NonEventStreamContentType(t *testing.T) {
+	srv := newTCP4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"__type":"ThrottlingException","message":"Rate exceeded"}`))
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(WithBaseURL(srv.URL))
+	payload := &kiroproto.Payload{ConversationState: kiroproto.ConversationState{AgentTaskType: "vibe", ChatTriggerType: "MANUAL", CurrentMessage: kiroproto.CurrentMessage{UserInputMessage: kiroproto.UserInputMessage{Content: "Hi"}}}}
+	_, err := c.GenerateAssistantResponse(context.Background(), "tok", payload, "us-east-1")
+	if err == nil {
+		t.Fatal("expected error for non-eventstream Content-Type")
+	}
+
+	var ue *UpstreamError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected *UpstreamError, got %T: %v", err, err)
+	}
+	if ue.Status != http.StatusOK {
+		t.Errorf("Status = %d, want %d", ue.Status, http.StatusOK)
+	}
+	if ue.ContentType != "application/json" {
+		t.Errorf("ContentType = %q, want %q", ue.ContentType, "application/json")
+	}
+	if ue.Exception != "ThrottlingException" {
+		t.Errorf("Exception = %q, want %q", ue.Exception, "ThrottlingException")
+	}
+	if !strings.Contains(ue.Body, "Rate exceeded") {
+		t.Errorf("Body should contain upstream message, got %q", ue.Body)
+	}
+}
+
+// TestHTTPClient_NonEventStreamThrottlingRetries verifies that a 200 response
+// with an AWS-style ThrottlingException JSON body triggers retry rather than
+// failing immediately.
+func TestHTTPClient_NonEventStreamThrottlingRetries(t *testing.T) {
+	var callCount atomic.Int32
+	srv := newTCP4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := callCount.Add(1)
+		if n <= 2 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"__type":"ThrottlingException","message":"Rate exceeded"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(WithBaseURL(srv.URL))
+	payload := &kiroproto.Payload{ConversationState: kiroproto.ConversationState{AgentTaskType: "vibe", ChatTriggerType: "MANUAL", CurrentMessage: kiroproto.CurrentMessage{UserInputMessage: kiroproto.UserInputMessage{Content: "Hi"}}}}
+	resp, err := c.GenerateAssistantResponse(context.Background(), "tok", payload, "us-east-1")
+	if err != nil {
+		t.Fatalf("unexpected error after retry: %v", err)
+	}
+	_ = resp.Body.Close()
+	if callCount.Load() != 3 {
+		t.Fatalf("expected 3 calls after 2 throttles, got %d", callCount.Load())
+	}
+}
+
+func TestParseAWSExceptionType(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"throttling", `{"__type":"ThrottlingException","message":"..."}`, "ThrottlingException"},
+		{"shape prefix", `{"__type":"com.amazon.coral.service#ThrottlingException"}`, "ThrottlingException"},
+		{"type field", `{"type":"InternalServerException"}`, "InternalServerException"},
+		{"code field", `{"code":"ServiceUnavailableException"}`, "ServiceUnavailableException"},
+		{"empty", ``, ""},
+		{"invalid", `not json`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseAWSExceptionType(tc.body)
+			if got != tc.want {
+				t.Errorf("parseAWSExceptionType(%q) = %q, want %q", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsRetryableAWSException(t *testing.T) {
+	retryable := []string{
+		"ThrottlingException",
+		"TooManyRequestsException",
+		"ServiceUnavailableException",
+		"InternalServerException",
+		"InternalFailureException",
+		"InternalServerError",
+	}
+	for _, e := range retryable {
+		if !isRetryableAWSException(e) {
+			t.Errorf("%q should be retryable", e)
+		}
+	}
+	nonRetryable := []string{"", "ValidationException", "AccessDeniedException", "ResourceNotFoundException"}
+	for _, e := range nonRetryable {
+		if isRetryableAWSException(e) {
+			t.Errorf("%q should NOT be retryable", e)
+		}
+	}
+}
+
+func TestIsEventStreamContentType(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"application/vnd.amazon.eventstream", true},
+		{"application/vnd.amazon.eventstream; charset=utf-8", true},
+		{"application/vnd.amazon.eventstream;charset=utf-8", true},
+		{"Application/VND.Amazon.EventStream", true},
+		{"application/json", false},
+		{"application/json; charset=utf-8", false},
+		{"", false},
+		{"text/plain", false},
+		{"application/vnd.amazon.eventstreamx", false}, // no separator
+	}
+	for _, tc := range cases {
+		if got := isEventStreamContentType(tc.in); got != tc.want {
+			t.Errorf("isEventStreamContentType(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestUpstreamError_429 verifies that 429 errors return *UpstreamError.
+func TestUpstreamError_429(t *testing.T) {
+	srv := newTCP4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"message":"slow down"}`))
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(WithBaseURL(srv.URL))
+	payload := &kiroproto.Payload{ConversationState: kiroproto.ConversationState{AgentTaskType: "vibe", ChatTriggerType: "MANUAL", CurrentMessage: kiroproto.CurrentMessage{UserInputMessage: kiroproto.UserInputMessage{Content: "Hi"}}}}
+	_, err := c.GenerateAssistantResponse(context.Background(), "tok", payload, "us-east-1")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	var ue *UpstreamError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected *UpstreamError, got %T: %v", err, err)
+	}
+	if ue.Status != http.StatusTooManyRequests {
+		t.Errorf("Status = %d, want %d", ue.Status, http.StatusTooManyRequests)
+	}
+	if !strings.Contains(ue.Body, "slow down") {
+		t.Errorf("Body = %q, want to contain %q", ue.Body, "slow down")
+	}
+}
+
+// TestUpstreamError_400 verifies that 400 errors return *UpstreamError.
+func TestUpstreamError_400(t *testing.T) {
+	srv := newTCP4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("bad request body"))
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(WithBaseURL(srv.URL))
+	payload := &kiroproto.Payload{ConversationState: kiroproto.ConversationState{AgentTaskType: "vibe", ChatTriggerType: "MANUAL", CurrentMessage: kiroproto.CurrentMessage{UserInputMessage: kiroproto.UserInputMessage{Content: "Hi"}}}}
+	_, err := c.GenerateAssistantResponse(context.Background(), "tok", payload, "us-east-1")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	var ue *UpstreamError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected *UpstreamError, got %T: %v", err, err)
+	}
+	if ue.Status != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", ue.Status, http.StatusBadRequest)
+	}
+	if ue.Body != "bad request body" {
+		t.Errorf("Body = %q, want %q", ue.Body, "bad request body")
+	}
+}
+
+// TestUpstreamError_XAmznErrorTypeHeader verifies that X-Amzn-ErrorType header
+// is used as fallback when __type is absent from the body.
+func TestUpstreamError_XAmznErrorTypeHeader(t *testing.T) {
+	srv := newTCP4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Amzn-ErrorType", "ValidationException:http://example.com")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"invalid"}`))
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(WithBaseURL(srv.URL))
+	payload := &kiroproto.Payload{ConversationState: kiroproto.ConversationState{AgentTaskType: "vibe", ChatTriggerType: "MANUAL", CurrentMessage: kiroproto.CurrentMessage{UserInputMessage: kiroproto.UserInputMessage{Content: "Hi"}}}}
+	_, err := c.GenerateAssistantResponse(context.Background(), "tok", payload, "us-east-1")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	var ue *UpstreamError
+	if !errors.As(err, &ue) {
+		t.Fatalf("expected *UpstreamError, got %T: %v", err, err)
+	}
+	if ue.Exception != "ValidationException" {
+		t.Errorf("Exception = %q, want %q", ue.Exception, "ValidationException")
+	}
+}
+
+// TestHTTPClient_BodyReadIdleTimeout verifies that when the Kiro API returns
+// 200 with eventstream headers but then stops sending data, the idle watchdog
+// fires and surfaces an error through ParseStream.
+func TestHTTPClient_BodyReadIdleTimeout(t *testing.T) {
+	srv := newTCP4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+		w.WriteHeader(http.StatusOK)
+		// Flush headers, then hang — never send body bytes.
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-r.Context().Done() // hold connection until test client disconnects
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(
+		WithBaseURL(srv.URL),
+		WithBodyReadIdleTimeout(50*time.Millisecond),
+	)
+	payload := &kiroproto.Payload{ConversationState: kiroproto.ConversationState{AgentTaskType: "vibe", ChatTriggerType: "MANUAL", CurrentMessage: kiroproto.CurrentMessage{UserInputMessage: kiroproto.UserInputMessage{Content: "Hi"}}}}
+	resp, err := c.GenerateAssistantResponse(context.Background(), "tok", payload, "us-east-1")
+	if err != nil {
+		t.Fatalf("GenerateAssistantResponse should succeed (200), got error: %v", err)
+	}
+
+	// Feed the body through ParseStream — the real production path.
+	// ParseStream uses bufio.Reader + io.ReadFull internally.
+	parseErr := kiroproto.ParseStream(context.Background(), resp.Body, func(e kiroproto.Event) bool {
+		t.Errorf("unexpected event: %+v", e)
+		return true
+	})
+	_ = resp.Body.Close()
+
+	if parseErr == nil {
+		t.Fatal("expected ParseStream to fail with idle timeout, got nil")
+	}
+	if !errors.Is(parseErr, ErrBodyReadIdle) {
+		t.Fatalf("expected ErrBodyReadIdle, got: %v", parseErr)
+	}
+}
+
+func TestNormalizeAWSExceptionType(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty", "", ""},
+		{"plain", "ThrottlingException", "ThrottlingException"},
+		{"hash prefix", "com.amazon.coral.service#ThrottlingException", "ThrottlingException"},
+		{"colon suffix", "ValidationException:http://example.com", "ValidationException"},
+		{"both hash and colon", "ns#ThrottlingException:hostname", "ThrottlingException"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeAWSExceptionType(tc.in)
+			if got != tc.want {
+				t.Errorf("normalizeAWSExceptionType(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 

@@ -5,9 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -88,7 +90,7 @@ func main() {
 	// Eagerly initialize tiktoken so the first API request doesn't block on BPE data fetch.
 	go tokencount.Preload()
 
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 	if cfg.APIKey == "" && cfg.Host != "127.0.0.1" && cfg.Host != "localhost" && cfg.Host != "::1" {
 		slog.Warn("server is binding to a non-loopback address without an API key — all endpoints are unauthenticated",
 			"host", cfg.Host)

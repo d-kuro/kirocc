@@ -49,6 +49,9 @@ func kmpOverlap(a, b string) int {
 	}
 
 	// Match b against a using the failure function.
+	// Must iterate over all bytes (not rune boundaries via `for i := range a`),
+	// since KMP here is a byte-level match — `range` over a string skips the
+	// interior bytes of multi-byte UTF-8 sequences and corrupts the overlap.
 	k = 0
 	for i := 0; i < len(a); i++ {
 		for k > 0 && b[k] != a[i] {

@@ -219,8 +219,7 @@ func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, req 
 
 	apiResp, err := s.client.GenerateAssistantResponse(ctx, creds.AccessToken, payload, creds.Region)
 	if err != nil {
-		slog.ErrorContext(ctx, "kiro api error",
-			"trace_id", short, "err", err)
+		logUpstreamError(ctx, short, err)
 		WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream API error")
 		return ""
 	}
