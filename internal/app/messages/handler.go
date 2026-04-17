@@ -84,7 +84,8 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		thinkingBudget = req.Thinking.BudgetTokens
 		// When budget_tokens is not explicitly set, derive from effort level.
 		if thinkingBudget <= 0 {
-			switch req.Effort() {
+			effort := req.Effort()
+			switch effort {
 			case anthropic.EffortMax:
 				thinkingBudget = anthropic.ThinkingBudgetMax
 			case anthropic.EffortXHigh:
@@ -94,9 +95,9 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 			case anthropic.EffortLow:
 				thinkingBudget = anthropic.ThinkingBudgetLow
 			default: // "medium" or unset
-				if e := req.Effort(); e != "" && e != anthropic.EffortMedium {
+				if effort != "" && effort != anthropic.EffortMedium {
 					slog.WarnContext(r.Context(), "unknown effort level, falling back to medium",
-						"trace_id", short, "effort", e)
+						"trace_id", short, "effort", effort)
 				}
 				thinkingBudget = anthropic.ThinkingBudgetMedium
 			}
