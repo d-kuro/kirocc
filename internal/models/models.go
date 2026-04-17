@@ -27,9 +27,10 @@ const (
 // Uses exact key matching against both Anthropic and Kiro fields (first match wins).
 // Order matters: specific entries must precede legacy aliases that share the same Kiro value.
 var modelMapOrdered = []Mapping{
+	{Anthropic: "claude-opus-4-7", Kiro: "claude-opus-4.7", Kiro1M: "claude-opus-4.7"},
 	{Anthropic: "claude-sonnet-4-6", Kiro: "claude-sonnet-4.6", Kiro1M: "claude-sonnet-4.6-1m"},
 	{Anthropic: "claude-sonnet-4.5", Kiro: "claude-sonnet-4.5", Kiro1M: "claude-sonnet-4.5-1m"},
-	{Anthropic: "claude-opus-4-6", Kiro: "claude-opus-4.6", Kiro1M: "claude-opus-4.6-1m"},
+	{Anthropic: "claude-opus-4-6", Kiro: "claude-opus-4.6", Kiro1M: "claude-opus-4.6"},
 	{Anthropic: "claude-opus-4.5", Kiro: "claude-opus-4.5"},
 	{Anthropic: "claude-haiku-4.5", Kiro: "claude-haiku-4.5"},
 }
@@ -127,13 +128,18 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 		}
 	}
 
-	// Use 1M model only when explicitly mapped.
-	if thinking && matchedKiro1M != "" {
+	// A mapping with Kiro1M == Kiro means the model always uses 1M context
+	// (no separate -1m SKU exists upstream, e.g. claude-opus-4.7). Thinking
+	// stays off unless explicitly requested via suffix, header, or request field.
+	switch {
+	case matchedKiro1M == kiroModel:
+		contextWindowSize = ThinkingContextWindowSize
+	case thinking && matchedKiro1M != "":
 		kiroModel = matchedKiro1M
 		contextWindowSize = ThinkingContextWindowSize
-	} else if matchedWindowSize > 0 {
+	case matchedWindowSize > 0:
 		contextWindowSize = matchedWindowSize
-	} else {
+	default:
 		contextWindowSize = DefaultContextWindowSize
 	}
 

@@ -253,16 +253,18 @@ Supported query forms:
 
 ### Model mappings
 
-| Input model             | Kiro model             |
-| ----------------------- | ---------------------- |
-| `claude-sonnet-4-6`     | `claude-sonnet-4.6`    |
-| `claude-sonnet-4-6[1m]` | `claude-sonnet-4.6-1m` |
-| `claude-sonnet-4.5`     | `claude-sonnet-4.5`    |
-| `claude-sonnet-4.5[1m]` | `claude-sonnet-4.5-1m` |
-| `claude-opus-4-6`       | `claude-opus-4.6`      |
-| `claude-opus-4-6[1m]`   | `claude-opus-4.6-1m`   |
-| `claude-opus-4.5`       | `claude-opus-4.5`      |
-| `claude-haiku-4.5`      | `claude-haiku-4.5`     |
+| Input model             | Kiro model             | Context window |
+| ----------------------- | ---------------------- | -------------- |
+| `claude-sonnet-4-6`     | `claude-sonnet-4.6`    | 200k           |
+| `claude-sonnet-4-6[1m]` | `claude-sonnet-4.6-1m` | 1M             |
+| `claude-sonnet-4.5`     | `claude-sonnet-4.5`    | 200k           |
+| `claude-sonnet-4.5[1m]` | `claude-sonnet-4.5-1m` | 1M             |
+| `claude-opus-4-7`       | `claude-opus-4.7`      | 1M             |
+| `claude-opus-4-6`       | `claude-opus-4.6`      | 1M             |
+| `claude-opus-4.5`       | `claude-opus-4.5`      | 200k           |
+| `claude-haiku-4.5`      | `claude-haiku-4.5`     | 200k           |
+
+Opus 4.6 and 4.7 always use 1M context (no 200k SKU exists upstream). Thinking is still opt-in via `[1m]` suffix, `Anthropic-Beta: context-1m` header, or `thinking` field.
 
 Unmatched `claude-*` models are passed through as-is. Non-claude models fall back to `claude-sonnet-4.6`.
 
