@@ -268,6 +268,10 @@ Opus 4.6 and 4.7 always use 1M context (no 200k SKU exists upstream). Thinking i
 
 Unmatched `claude-*` models are passed through as-is. Non-claude models fall back to `claude-sonnet-4.6`.
 
+#### Response model ID
+
+The `model` field in `/v1/messages` responses (streaming `message_start`, non-streaming body, and tool-search path) is returned as the **Anthropic-form ID** (e.g. `claude-opus-4-7`), not the Kiro SKU (`claude-opus-4.7`). Claude Code detects context window size by matching the response's model ID against its own hard-coded table of hyphenated Anthropic IDs — the dotted Kiro SKU would not match and would cause Claude Code to fall back to the 200k default, triggering auto-compact prematurely for 1M-context models like Opus 4.7 / 4.6 and Sonnet 4.6.
+
 ## License
 
 Apache License 2.0

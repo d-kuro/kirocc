@@ -37,6 +37,12 @@ var modelMapOrdered = []Mapping{
 
 const DefaultModel = "claude-sonnet-4.6"
 
+// DefaultAnthropicModel is the Anthropic-form ID corresponding to DefaultModel.
+// Returned as the response model for non-claude fallback so callers like
+// Claude Code can map it to a context window size. Kept as a separate constant
+// (not derived from modelMapOrdered) so env overrides cannot poison it.
+const DefaultAnthropicModel = "claude-sonnet-4-6"
+
 // envCache caches parsed env mappings, re-parsing only when the raw string changes.
 var envCache struct {
 	mu     sync.Mutex
@@ -84,16 +90,13 @@ func effectiveMappings() []Mapping {
 	return result
 }
 
-// Resolve maps an Anthropic or Kiro model name to a Kiro model name and context window size.
-// It strips ThinkingSuffix if present (sets thinking=true), then matches
-// against effective mappings (env overrides + built-in) on both Anthropic and
-// Kiro fields using first-match semantics. When thinking is true and the
-// matched mapping has a Kiro1M value, that value is used as the model with a
-// 1M context window. If Kiro1M is empty, the base Kiro model is used with
-// its default context window. Unmatched claude-* models are passed through.
-// Non-claude models return DefaultModel.
+// Resolve maps an Anthropic or Kiro model name to the Kiro SKU sent upstream,
+// the thinking flag, the context window size, and the Anthropic-form ID to
+// echo back in /v1/messages responses. Returning the Anthropic-form ID matters
+// because Claude Code decides context window size by matching the response's
+// model against its own hyphenated-ID table; the dotted Kiro SKU would miss.
 // KIROCC_MODEL_MAPPINGS env var can override mappings.
-func Resolve(model string, context1M bool) (kiroModel string, thinking bool, contextWindowSize int) {
+func Resolve(model string, context1M bool) (kiroModel string, thinking bool, contextWindowSize int, anthropicModel string) {
 	// Strip thinking suffix
 	if before, ok := strings.CutSuffix(model, ThinkingSuffix); ok {
 		model = before
@@ -105,12 +108,14 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 
 	var matchedWindowSize int
 	var matchedKiro1M string
+	var matchedAnthropic string
 	var matched bool
 	for _, m := range effectiveMappings() {
 		if model == m.Anthropic || model == m.Kiro {
 			kiroModel = m.Kiro
 			matchedKiro1M = m.Kiro1M
 			matchedWindowSize = m.ContextWindowSize
+			matchedAnthropic = m.Anthropic
 			matched = true
 			break
 		}
@@ -119,13 +124,17 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 	if !matched {
 		if strings.HasPrefix(model, "claude-") {
 			kiroModel = model
+			anthropicModel = model
 		} else {
 			slog.Warn("models.Resolve: non-claude model, falling back to default",
 				"requested_model", model,
 				"kiro_model", DefaultModel,
 			)
 			kiroModel = DefaultModel
+			anthropicModel = DefaultAnthropicModel
 		}
+	} else {
+		anthropicModel = matchedAnthropic
 	}
 
 	// A mapping with Kiro1M == Kiro means the model always uses 1M context
@@ -143,7 +152,7 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 		contextWindowSize = DefaultContextWindowSize
 	}
 
-	return kiroModel, thinking, contextWindowSize
+	return kiroModel, thinking, contextWindowSize, anthropicModel
 }
 
 // ListModels returns a deduplicated list of all Kiro model values from
