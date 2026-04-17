@@ -229,7 +229,7 @@ Thinking is enabled by any of:
 The thinking budget is determined by:
 
 1. `thinking.budget_tokens` if explicitly set
-2. Derived from `output_config.effort`: `max` = 160000, `high` = 31999, `medium` = 10000, `low` = 4000
+2. Derived from `output_config.effort`: `max` = 160000, `xhigh` = 80000, `high` = 40000, `medium` = 10000, `low` = 4000
 3. Default: 10000 (medium)
 
 ### Tool Search
