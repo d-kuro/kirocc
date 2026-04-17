@@ -87,6 +87,8 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 			switch req.Effort() {
 			case anthropic.EffortMax:
 				thinkingBudget = anthropic.ThinkingBudgetMax
+			case anthropic.EffortXHigh:
+				thinkingBudget = anthropic.ThinkingBudgetXHigh
 			case anthropic.EffortHigh:
 				thinkingBudget = anthropic.ThinkingBudgetHigh
 			case anthropic.EffortLow:

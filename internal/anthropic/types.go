@@ -39,6 +39,7 @@ const (
 // Effort level constants (set via output_config.effort).
 const (
 	EffortMax    = "max"
+	EffortXHigh  = "xhigh"
 	EffortHigh   = "high"
 	EffortMedium = "medium"
 	EffortLow    = "low"
@@ -47,7 +48,8 @@ const (
 // Thinking budget tokens per reasoning effort level.
 const (
 	ThinkingBudgetMax    = 160000
-	ThinkingBudgetHigh   = 31999
+	ThinkingBudgetXHigh  = 80000
+	ThinkingBudgetHigh   = 40000
 	ThinkingBudgetMedium = 10000
 	ThinkingBudgetLow    = 4000
 )
