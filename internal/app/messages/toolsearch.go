@@ -28,13 +28,14 @@ type toolSearchOrchestrator struct {
 	creds             *auth.Credentials
 	buildOpts         reqconv.BuildOptions
 	contextWindowSize int
+	responseModel     string
 }
 
 func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.ResponseWriter) string {
 	_, short := logging.TraceIDs(ctx)
 
 	gw := NewGateWriter(w)
-	sw := respconv.NewSSEWriter(ctx, gw, o.buildOpts.ModelID, o.contextWindowSize, o.req.StopSequences, o.req.MaxTokens, 0)
+	sw := respconv.NewSSEWriter(ctx, gw, o.responseModel, o.contextWindowSize, o.req.StopSequences, o.req.MaxTokens, 0)
 	sw.OnVisibleOutput = func() { gw.Promote() }
 
 	msgs := slices.Clone(o.req.Messages)
@@ -206,7 +207,7 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 			return ""
 		}
 
-		resp, stats := acc.BuildResponse(o.buildOpts.ModelID)
+		resp, stats := acc.BuildResponse(o.responseModel)
 		totalInputTokens += stats.InputTokens
 		totalOutputTokens += stats.OutputTokens
 		lastStopReason, _ = resp["stop_reason"].(string)
@@ -276,7 +277,7 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 		"type":          "message",
 		"role":          "assistant",
 		"content":       orderedBlocks,
-		"model":         o.buildOpts.ModelID,
+		"model":         o.responseModel,
 		"stop_reason":   lastStopReason,
 		"stop_sequence": lastStopSequence,
 		"usage": map[string]any{

@@ -93,7 +93,17 @@ func effectiveMappings() []Mapping {
 // its default context window. Unmatched claude-* models are passed through.
 // Non-claude models return DefaultModel.
 // KIROCC_MODEL_MAPPINGS env var can override mappings.
-func Resolve(model string, context1M bool) (kiroModel string, thinking bool, contextWindowSize int) {
+//
+// anthropicModel is the model ID to return in /v1/messages responses. Claude
+// Code reads the response model and matches it against its own hard-coded
+// hyphenated-ID table to decide context window size, so the response must use
+// the Anthropic-form ID (e.g. "claude-opus-4-7") rather than the Kiro SKU
+// ("claude-opus-4.7"). When a mapping matches, the mapping's Anthropic field
+// is used. For unmatched claude-* passthrough, the request model (with
+// ThinkingSuffix stripped) is returned. For the non-claude DefaultModel
+// fallback, the built-in mapping is reverse-looked-up so env overrides cannot
+// poison it with an empty Anthropic field.
+func Resolve(model string, context1M bool) (kiroModel string, thinking bool, contextWindowSize int, anthropicModel string) {
 	// Strip thinking suffix
 	if before, ok := strings.CutSuffix(model, ThinkingSuffix); ok {
 		model = before
@@ -105,12 +115,14 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 
 	var matchedWindowSize int
 	var matchedKiro1M string
+	var matchedAnthropic string
 	var matched bool
 	for _, m := range effectiveMappings() {
 		if model == m.Anthropic || model == m.Kiro {
 			kiroModel = m.Kiro
 			matchedKiro1M = m.Kiro1M
 			matchedWindowSize = m.ContextWindowSize
+			matchedAnthropic = m.Anthropic
 			matched = true
 			break
 		}
@@ -119,13 +131,17 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 	if !matched {
 		if strings.HasPrefix(model, "claude-") {
 			kiroModel = model
+			anthropicModel = model
 		} else {
 			slog.Warn("models.Resolve: non-claude model, falling back to default",
 				"requested_model", model,
 				"kiro_model", DefaultModel,
 			)
 			kiroModel = DefaultModel
+			anthropicModel = defaultAnthropicModel()
 		}
+	} else {
+		anthropicModel = matchedAnthropic
 	}
 
 	// A mapping with Kiro1M == Kiro means the model always uses 1M context
@@ -143,7 +159,19 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 		contextWindowSize = DefaultContextWindowSize
 	}
 
-	return kiroModel, thinking, contextWindowSize
+	return kiroModel, thinking, contextWindowSize, anthropicModel
+}
+
+// defaultAnthropicModel returns the Anthropic-form ID for DefaultModel by
+// reverse-looking-up the built-in mapping table. Env overrides are ignored
+// here so a malformed override cannot leave us returning an empty string.
+func defaultAnthropicModel() string {
+	for _, m := range modelMapOrdered {
+		if m.Kiro == DefaultModel && m.Anthropic != "" {
+			return m.Anthropic
+		}
+	}
+	return DefaultModel
 }
 
 // ListModels returns a deduplicated list of all Kiro model values from

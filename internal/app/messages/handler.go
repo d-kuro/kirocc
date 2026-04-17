@@ -51,7 +51,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	kiroModel, thinking, contextWindowSize := models.Resolve(req.Model, hasContext1MBeta(r.Header))
+	kiroModel, thinking, contextWindowSize, anthropicModel := models.Resolve(req.Model, hasContext1MBeta(r.Header))
 
 	// Also check the request's thinking field (Anthropic API standard).
 	if req.IsThinkingEnabled() {
@@ -132,6 +132,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 				ToolSearchCtx:  tsCtx,
 			},
 			contextWindowSize: contextWindowSize,
+			responseModel:     anthropicModel,
 		}
 		var retryReason string
 		if req.Stream {
@@ -170,7 +171,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	reverseMap := nameMap.ReverseMap()
 
-	retryReason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, contextWindowSize, thinking, 1, reverseMap)
+	retryReason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, anthropicModel, contextWindowSize, thinking, 1, reverseMap)
 	if retryReason == "" {
 		return
 	}
@@ -185,7 +186,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		)
 		// Clear IDs to break out of stuck conversation state.
 		payload.ConversationState.ConversationID = ""
-		reason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, contextWindowSize, thinking, 2, reverseMap)
+		reason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, anthropicModel, contextWindowSize, thinking, 2, reverseMap)
 		if reason == "" {
 			return
 		}
@@ -208,7 +209,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		"reason", retryReason,
 	)
 	payload.ConversationState.ConversationID = ""
-	if reason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, contextWindowSize, thinking, 2, reverseMap); reason != "" {
+	if reason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, anthropicModel, contextWindowSize, thinking, 2, reverseMap); reason != "" {
 		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, "invalid state: "+reason)
 	}
 }
@@ -216,7 +217,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 // callAndHandle calls the Kiro API and handles the response.
 // Returns a non-empty reason string if the request failed with a retryable invalidStateEvent
 // before the stream started (i.e., no bytes written to w yet). Returns "" on success or non-retryable error.
-func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, payload *kiroproto.Payload, creds *auth.Credentials, model string, contextWindowSize int, thinking bool, attempt int, toolNameMap map[string]string) string {
+func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, payload *kiroproto.Payload, creds *auth.Credentials, model, responseModel string, contextWindowSize int, thinking bool, attempt int, toolNameMap map[string]string) string {
 	_, short := logging.TraceIDs(ctx)
 	capture := newUpstreamAttemptCapture(ctx, payload, model, thinking, req.Stream, attempt)
 
@@ -234,9 +235,9 @@ func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, req 
 
 	var reason string
 	if req.Stream {
-		reason = s.handleStreamingResponse(ctx, w, apiResp, model, contextWindowSize, req.StopSequences, req.MaxTokens, apiResp.PromptTokens, capture, toolNameMap)
+		reason = s.handleStreamingResponse(ctx, w, apiResp, responseModel, contextWindowSize, req.StopSequences, req.MaxTokens, apiResp.PromptTokens, capture, toolNameMap)
 	} else {
-		reason = s.handleNonStreamingResponse(ctx, w, apiResp, model, contextWindowSize, req.StopSequences, req.MaxTokens, apiResp.PromptTokens, capture, toolNameMap)
+		reason = s.handleNonStreamingResponse(ctx, w, apiResp, responseModel, contextWindowSize, req.StopSequences, req.MaxTokens, apiResp.PromptTokens, capture, toolNameMap)
 	}
 	if reason == retryReasonEmptyVisibleEndTurn {
 		capture.logCapture(ctx, reason)
