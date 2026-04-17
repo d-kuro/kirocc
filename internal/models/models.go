@@ -37,6 +37,12 @@ var modelMapOrdered = []Mapping{
 
 const DefaultModel = "claude-sonnet-4.6"
 
+// DefaultAnthropicModel is the Anthropic-form ID corresponding to DefaultModel.
+// Returned as the response model for non-claude fallback so callers like
+// Claude Code can map it to a context window size. Kept as a separate constant
+// (not derived from modelMapOrdered) so env overrides cannot poison it.
+const DefaultAnthropicModel = "claude-sonnet-4-6"
+
 // envCache caches parsed env mappings, re-parsing only when the raw string changes.
 var envCache struct {
 	mu     sync.Mutex
@@ -84,25 +90,12 @@ func effectiveMappings() []Mapping {
 	return result
 }
 
-// Resolve maps an Anthropic or Kiro model name to a Kiro model name and context window size.
-// It strips ThinkingSuffix if present (sets thinking=true), then matches
-// against effective mappings (env overrides + built-in) on both Anthropic and
-// Kiro fields using first-match semantics. When thinking is true and the
-// matched mapping has a Kiro1M value, that value is used as the model with a
-// 1M context window. If Kiro1M is empty, the base Kiro model is used with
-// its default context window. Unmatched claude-* models are passed through.
-// Non-claude models return DefaultModel.
+// Resolve maps an Anthropic or Kiro model name to the Kiro SKU sent upstream,
+// the thinking flag, the context window size, and the Anthropic-form ID to
+// echo back in /v1/messages responses. Returning the Anthropic-form ID matters
+// because Claude Code decides context window size by matching the response's
+// model against its own hyphenated-ID table; the dotted Kiro SKU would miss.
 // KIROCC_MODEL_MAPPINGS env var can override mappings.
-//
-// anthropicModel is the model ID to return in /v1/messages responses. Claude
-// Code reads the response model and matches it against its own hard-coded
-// hyphenated-ID table to decide context window size, so the response must use
-// the Anthropic-form ID (e.g. "claude-opus-4-7") rather than the Kiro SKU
-// ("claude-opus-4.7"). When a mapping matches, the mapping's Anthropic field
-// is used. For unmatched claude-* passthrough, the request model (with
-// ThinkingSuffix stripped) is returned. For the non-claude DefaultModel
-// fallback, the built-in mapping is reverse-looked-up so env overrides cannot
-// poison it with an empty Anthropic field.
 func Resolve(model string, context1M bool) (kiroModel string, thinking bool, contextWindowSize int, anthropicModel string) {
 	// Strip thinking suffix
 	if before, ok := strings.CutSuffix(model, ThinkingSuffix); ok {
@@ -138,7 +131,7 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 				"kiro_model", DefaultModel,
 			)
 			kiroModel = DefaultModel
-			anthropicModel = defaultAnthropicModel()
+			anthropicModel = DefaultAnthropicModel
 		}
 	} else {
 		anthropicModel = matchedAnthropic
@@ -160,18 +153,6 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 	}
 
 	return kiroModel, thinking, contextWindowSize, anthropicModel
-}
-
-// defaultAnthropicModel returns the Anthropic-form ID for DefaultModel by
-// reverse-looking-up the built-in mapping table. Env overrides are ignored
-// here so a malformed override cannot leave us returning an empty string.
-func defaultAnthropicModel() string {
-	for _, m := range modelMapOrdered {
-		if m.Kiro == DefaultModel && m.Anthropic != "" {
-			return m.Anthropic
-		}
-	}
-	return DefaultModel
 }
 
 // ListModels returns a deduplicated list of all Kiro model values from

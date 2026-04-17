@@ -8,11 +8,9 @@ import (
 	"testing"
 )
 
-// TestE2E_ResponseModel_NonStreaming verifies that the /v1/messages non-streaming
-// response body returns the Anthropic-form model ID (e.g. claude-opus-4-7), not
-// the Kiro SKU (claude-opus-4.7). Claude Code matches this ID against its
-// hard-coded table to detect the 1M context window; the dotted Kiro SKU would
-// fall back to the 200k default and trigger premature auto-compact.
+// TestE2E_ResponseModel_NonStreaming verifies the non-streaming response body
+// carries the Anthropic-form model ID so Claude Code's context-window table
+// (which keys off hyphenated IDs) picks up 1M-context models correctly.
 func TestE2E_ResponseModel_NonStreaming(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -85,8 +83,8 @@ func TestE2E_ResponseModel_NonStreaming(t *testing.T) {
 	}
 }
 
-// TestE2E_ResponseModel_Streaming verifies that the SSE message_start event
-// contains the Anthropic-form model ID.
+// TestE2E_ResponseModel_Streaming verifies message_start carries the
+// Anthropic-form model ID.
 func TestE2E_ResponseModel_Streaming(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -127,8 +125,8 @@ func TestE2E_ResponseModel_Streaming(t *testing.T) {
 	}
 }
 
-// extractMessageStartModel scans an SSE body for the message_start event and
-// returns its message.model field.
+// extractMessageStartModel returns message.model from the first message_start
+// SSE event in body.
 func extractMessageStartModel(t *testing.T, body io.Reader) string {
 	t.Helper()
 	scanner := bufio.NewScanner(body)
