@@ -33,6 +33,16 @@ type toolSearchOrchestrator struct {
 	responseModel     string
 }
 
+// run dispatches to the streaming or non-streaming implementation based on
+// req.Stream. Returns retryReasonEmptyVisibleEndTurn when the upstream
+// produced thinking-only output and the call site should retry.
+func (o *toolSearchOrchestrator) run(ctx context.Context, w http.ResponseWriter) string {
+	if o.req.Stream {
+		return o.handleStreaming(ctx, w)
+	}
+	return o.handleNonStreaming(ctx, w)
+}
+
 func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.ResponseWriter) string {
 	_, short := logging.TraceIDs(ctx)
 
