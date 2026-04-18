@@ -21,15 +21,14 @@ func TestResolve(t *testing.T) {
 			model:              "claude-opus-4-7",
 			wantKiroModel:      "claude-opus-4.7",
 			wantContextWindow:  ThinkingContextWindowSize,
-			wantAnthropicModel: "claude-opus-4-7",
+			wantAnthropicModel: "claude-opus-4-7[1m]",
 		},
 		{
-			name:               "claude-opus-4-7 with thinking suffix",
+			name:               "claude-opus-4-7[1m] exact-match preserves suffix without thinking",
 			model:              "claude-opus-4-7[1m]",
 			wantKiroModel:      "claude-opus-4.7",
-			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
-			wantAnthropicModel: "claude-opus-4-7",
+			wantAnthropicModel: "claude-opus-4-7[1m]",
 		},
 		{
 			name:               "claude-opus-4-7 with context1M",
@@ -38,7 +37,7 @@ func TestResolve(t *testing.T) {
 			wantKiroModel:      "claude-opus-4.7",
 			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
-			wantAnthropicModel: "claude-opus-4-7",
+			wantAnthropicModel: "claude-opus-4-7[1m]",
 		},
 		{
 			name:               "kiro model name claude-opus-4.7 always resolves to 1m",
@@ -46,22 +45,21 @@ func TestResolve(t *testing.T) {
 			wantKiroModel:      "claude-opus-4.7",
 			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
-			wantAnthropicModel: "claude-opus-4-7",
+			wantAnthropicModel: "claude-opus-4-7[1m]",
 		},
 		{
 			name:               "claude-opus-4-6 uses 1m context without thinking",
 			model:              "claude-opus-4-6",
 			wantKiroModel:      "claude-opus-4.6",
 			wantContextWindow:  ThinkingContextWindowSize,
-			wantAnthropicModel: "claude-opus-4-6",
+			wantAnthropicModel: "claude-opus-4-6[1m]",
 		},
 		{
-			name:               "claude-opus-4-6 with thinking suffix",
+			name:               "claude-opus-4-6[1m] exact-match preserves suffix without thinking",
 			model:              "claude-opus-4-6[1m]",
 			wantKiroModel:      "claude-opus-4.6",
-			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
-			wantAnthropicModel: "claude-opus-4-6",
+			wantAnthropicModel: "claude-opus-4-6[1m]",
 		},
 		{
 			name:               "claude-opus-4-6 with context1M",
@@ -70,7 +68,7 @@ func TestResolve(t *testing.T) {
 			wantKiroModel:      "claude-opus-4.6",
 			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
-			wantAnthropicModel: "claude-opus-4-6",
+			wantAnthropicModel: "claude-opus-4-6[1m]",
 		},
 		{
 			name:               "claude-sonnet-4-6",
@@ -92,7 +90,7 @@ func TestResolve(t *testing.T) {
 			wantKiroModel:      "claude-sonnet-4.6-1m",
 			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
-			wantAnthropicModel: "claude-sonnet-4-6",
+			wantAnthropicModel: "claude-sonnet-4-6[1m]",
 		},
 		{
 			name:               "claude-sonnet-4-6 with context1M resolves to 1m",
@@ -101,7 +99,7 @@ func TestResolve(t *testing.T) {
 			wantKiroModel:      "claude-sonnet-4.6-1m",
 			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
-			wantAnthropicModel: "claude-sonnet-4-6",
+			wantAnthropicModel: "claude-sonnet-4-6[1m]",
 		},
 		{
 			name:               "claude-sonnet-4 with thinking suffix passthrough no 1m variant",
@@ -141,7 +139,7 @@ func TestResolve(t *testing.T) {
 			wantKiroModel:      "claude-sonnet-4.6-1m",
 			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
-			wantAnthropicModel: "claude-sonnet-4-6",
+			wantAnthropicModel: "claude-sonnet-4-6[1m]",
 		},
 		{
 			name:               "kiro model name claude-opus-4.6 with thinking suffix",
@@ -149,7 +147,7 @@ func TestResolve(t *testing.T) {
 			wantKiroModel:      "claude-opus-4.6",
 			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
-			wantAnthropicModel: "claude-opus-4-6",
+			wantAnthropicModel: "claude-opus-4-6[1m]",
 		},
 		{
 			name:               "unknown claude model passthrough",
@@ -196,6 +194,14 @@ func TestResolve(t *testing.T) {
 			wantKiroModel:      DefaultModel,
 			wantContextWindow:  DefaultContextWindowSize,
 			wantAnthropicModel: "claude-sonnet-4-6",
+		},
+		{
+			name:               "env override with already-suffixed anthropic does not double-suffix at 1m",
+			envMappings:        `[{"anthropic":"custom-1m[1m]","kiro":"claude-custom-1m","kiro_1m":"claude-custom-1m"}]`,
+			model:              "claude-custom-1m",
+			wantKiroModel:      "claude-custom-1m",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "custom-1m[1m]",
 		},
 	}
 
