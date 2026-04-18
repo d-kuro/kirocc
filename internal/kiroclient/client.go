@@ -8,9 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand/v2"
 	"net/http"
-	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -130,39 +128,7 @@ func (c *HTTPClient) bodyReadIdleTimeout() time.Duration {
 	return defaultBodyReadIdleTimeout
 }
 
-// idleReader wraps an io.ReadCloser and enforces an idle timeout per Read call.
-// If no data is read within the configured duration, Read returns ErrBodyReadIdle.
-//
-// The timeout recovery works by calling Close on the underlying reader, which
-// is guaranteed to unblock a pending Read for net/http.Response.Body. This is
-// NOT a general guarantee for arbitrary io.ReadCloser implementations.
-type idleReader struct {
-	rc   io.ReadCloser
-	idle time.Duration
-}
-
-func (r *idleReader) Read(p []byte) (int, error) {
-	type result struct {
-		n   int
-		err error
-	}
-	ch := make(chan result, 1) // buffered: sender never blocks even if we time out
-	go func() {
-		n, err := r.rc.Read(p)
-		ch <- result{n, err}
-	}()
-	t := time.NewTimer(r.idle)
-	defer t.Stop()
-	select {
-	case res := <-ch:
-		return res.n, res.err
-	case <-t.C:
-		_ = r.rc.Close() // forces the pending Read to unblock (net/http guarantee)
-		return 0, ErrBodyReadIdle
-	}
-}
-
-func (r *idleReader) Close() error { return r.rc.Close() }
+// idleReader moved to idle_reader.go.
 
 func (c *HTTPClient) recordError(ctx context.Context, err error) {
 	if c.otel {
@@ -352,137 +318,4 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 	err = fmt.Errorf("kiro api: max retries exceeded")
 	c.recordError(ctx, err)
 	return nil, err
-}
-
-// parseAWSExceptionType extracts the AWS exception type from an error body.
-// AWS JSON 1.0 errors encode the exception class as "__type", optionally
-// prefixed by a shape name ("com.amazonaws...#ThrottlingException").
-// Returns "" if the body cannot be parsed.
-func parseAWSExceptionType(body string) string {
-	if body == "" {
-		return ""
-	}
-	var m struct {
-		Type1 string `json:"__type"`
-		Type2 string `json:"type"`
-		Code  string `json:"code"`
-	}
-	if err := json.Unmarshal([]byte(body), &m); err != nil {
-		return ""
-	}
-	t := m.Type1
-	if t == "" {
-		t = m.Type2
-	}
-	if t == "" {
-		t = m.Code
-	}
-	return normalizeAWSExceptionType(t)
-}
-
-// isRetryableAWSException reports whether an AWS exception type is transient
-// and worth retrying (modeled after the AWS SDK retry policy).
-func isRetryableAWSException(exType string) bool {
-	switch exType {
-	case "ThrottlingException",
-		"TooManyRequestsException",
-		"ServiceUnavailableException",
-		"InternalServerException",
-		"InternalFailureException",
-		"InternalServerError":
-		return true
-	}
-	return false
-}
-
-// UpstreamError is returned when the Kiro API responds with an HTTP error
-// (any non-success status) or an unexpected Content-Type on a 200 response.
-// Callers can use errors.As to extract structured fields for logging.
-type UpstreamError struct {
-	Status      int    // HTTP status code
-	ContentType string // Content-Type header value
-	Exception   string // AWS exception class (normalized, may be "")
-	Body        string // response body (up to 8 KiB)
-}
-
-func (e *UpstreamError) Error() string {
-	return fmt.Sprintf("kiro api: status=%d content_type=%q exception=%q: %s",
-		e.Status, e.ContentType, e.Exception, e.Body)
-}
-
-// normalizeAWSExceptionType strips namespace prefixes and hostname suffixes
-// from an AWS exception type string. AWS uses two formats:
-//   - JSON __type: "com.amazon.coral.service#ThrottlingException"
-//   - Header X-Amzn-ErrorType: "ThrottlingException:http://example.com"
-//
-// This function handles both by stripping after '#' and before ':'.
-func normalizeAWSExceptionType(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	// Strip namespace prefix (e.g. "com.amazon.coral.service#ThrottlingException").
-	if i := strings.LastIndexByte(raw, '#'); i >= 0 {
-		raw = raw[i+1:]
-	}
-	// Strip hostname suffix (e.g. "ThrottlingException:http://example.com").
-	if colon, _, ok := strings.Cut(raw, ":"); ok {
-		raw = colon
-	}
-	return raw
-}
-
-// resolveAWSException determines the AWS exception type from the response,
-// checking the body first, then falling back to the X-Amzn-ErrorType header.
-func resolveAWSException(body string, header http.Header) string {
-	if exType := parseAWSExceptionType(body); exType != "" {
-		return exType
-	}
-	return normalizeAWSExceptionType(header.Get("X-Amzn-ErrorType"))
-}
-
-// isEventStreamContentType reports whether ct matches the AWS event stream
-// content type (with or without parameters such as "; charset=...").
-func isEventStreamContentType(ct string) bool {
-	const want = "application/vnd.amazon.eventstream"
-	if len(ct) < len(want) {
-		return false
-	}
-	head := ct[:len(want)]
-	if !strings.EqualFold(head, want) {
-		return false
-	}
-	// Accept either exact match or media-type parameter separator.
-	if len(ct) == len(want) {
-		return true
-	}
-	c := ct[len(want)]
-	return c == ';' || c == ' ' || c == '\t'
-}
-
-// backoffDelay returns exponential backoff delay with ±25% jitter.
-func backoffDelay(attempt int) time.Duration {
-	base := baseRetryDelay << attempt
-	jitter := time.Duration(rand.Int64N(int64(base)/2)) - base/4
-	return base + jitter
-}
-
-// readLimitedBody reads up to n bytes from body and closes it.
-func readLimitedBody(body io.ReadCloser, n int64) string {
-	b, _ := io.ReadAll(io.LimitReader(body, n))
-	_ = body.Close()
-	return string(b)
-}
-
-const upstreamBodyLimit = 8192
-
-// retryWait waits for the given delay, respecting ctx cancellation.
-func retryWait(ctx context.Context, delay time.Duration) error {
-	t := time.NewTimer(delay)
-	defer t.Stop()
-	select {
-	case <-t.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
