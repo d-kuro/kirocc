@@ -71,9 +71,9 @@ type responseAccumulator struct {
 	maxTokensBudget int // 0 = no enforcement
 	outputRuneCount int // cumulative rune count across all output content
 	// Thinking tag parser state.
-	thinkingTagInside bool   // currently inside <thinking> tags
-	thinkingTagBuf    string // buffer for partial tag matching across chunk boundaries
-	suppressReasoningContent   bool   // true if <thinking> tags were detected (guards against double-counting with reasoningContentEvent)
+	thinkingTagInside        bool   // currently inside <thinking> tags
+	thinkingTagBuf           string // buffer for partial tag matching across chunk boundaries
+	suppressReasoningContent bool   // true if <thinking> tags were detected (guards against double-counting with reasoningContentEvent)
 	// DropToolName, when set, causes ProcessEvent to skip recording tool_use
 	// events with this name in HasToolUse/ToolCalls (used by tool search orchestrator).
 	DropToolName string

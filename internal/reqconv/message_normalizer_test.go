@@ -27,7 +27,7 @@ func TestStep3_EnsureStartsWithUser(t *testing.T) {
 	msgs := []anthropic.Message{
 		{Role: "assistant", Content: anthropic.MessageContent{Text: "Hi"}},
 	}
-	got := step3EnsureStartsWithUser(msgs)
+	got := ensureStartsWithUser(msgs)
 	if len(got) != 2 {
 		t.Fatalf("got %d, want 2", len(got))
 	}
@@ -41,7 +41,7 @@ func TestStep4_NormalizeRoles(t *testing.T) {
 		{Role: "developer", Content: anthropic.MessageContent{Text: "System"}},
 		{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
 	}
-	got := step4NormalizeRoles(msgs)
+	got := normalizeRoles(msgs)
 	if got[0].Role != "user" {
 		t.Fatalf("developer should become user, got %q", got[0].Role)
 	}
@@ -52,7 +52,7 @@ func TestStep5_EnsureAlternating(t *testing.T) {
 		{Role: "user", Content: anthropic.MessageContent{Text: "A"}},
 		{Role: "user", Content: anthropic.MessageContent{Text: "B"}},
 	}
-	got := step5EnsureAlternating(msgs)
+	got := ensureAlternatingRoles(msgs)
 	if len(got) != 3 {
 		t.Fatalf("got %d, want 3", len(got))
 	}
@@ -73,7 +73,7 @@ func TestStep1a_TextualizeAllToolContent(t *testing.T) {
 			},
 		},
 	}
-	got := step1aTextualizeAllToolContent(msgs)
+	got := textualizeAllToolContent(msgs)
 	if len(got[0].Content.Blocks) != 2 {
 		t.Fatalf("got %d blocks", len(got[0].Content.Blocks))
 	}
@@ -102,7 +102,7 @@ func TestStep1b_TextualizeOrphanToolResults(t *testing.T) {
 			},
 		},
 	}
-	got := step1bTextualizeOrphanToolResults(msgs)
+	got := textualizeOrphanToolResults(msgs)
 	userBlocks := got[1].Content.Blocks
 	if len(userBlocks) != 2 {
 		t.Fatalf("got %d blocks", len(userBlocks))
@@ -123,7 +123,7 @@ func TestStep2_MergeAdjacentSameRole(t *testing.T) {
 		{Role: "user", Content: anthropic.MessageContent{Text: "World"}},
 		{Role: "assistant", Content: anthropic.MessageContent{Text: "Hi"}},
 	}
-	got := step2MergeAdjacentSameRole(msgs)
+	got := mergeAdjacentSameRole(msgs)
 	if len(got) != 2 {
 		t.Fatalf("got %d, want 2", len(got))
 	}
@@ -194,14 +194,14 @@ func TestStep4NormalizeRoles_DoesNotMutateInput(t *testing.T) {
 		{Role: "developer", Content: anthropic.MessageContent{Text: "hi"}},
 	}
 	original := msgs[0].Role
-	step4NormalizeRoles(msgs)
+	normalizeRoles(msgs)
 	if msgs[0].Role != original {
 		t.Fatalf("input mutated: role changed from %q to %q", original, msgs[0].Role)
 	}
 }
 
 func TestExtractToolResultContentText_ToolSearchResult(t *testing.T) {
-	// Use step1aTextualizeAllToolContent to exercise extractToolResultContentText indirectly.
+	// Use textualizeAllToolContent to exercise extractToolResultContentText indirectly.
 	msgs := []anthropic.Message{
 		{
 			Role: "user",
@@ -226,7 +226,7 @@ func TestExtractToolResultContentText_ToolSearchResult(t *testing.T) {
 			},
 		},
 	}
-	got := step1aTextualizeAllToolContent(msgs)
+	got := textualizeAllToolContent(msgs)
 	text := got[0].Content.Blocks[0].Text
 	if !strings.Contains(text, "tool_reference: Read") {
 		t.Fatalf("expected 'tool_reference: Read' in %q", text)
@@ -248,7 +248,7 @@ func TestStep2_DoesNotMergeStructuredContent(t *testing.T) {
 			},
 		},
 	}
-	got := step2MergeAdjacentSameRole(msgs)
+	got := mergeAdjacentSameRole(msgs)
 	if len(got) != 2 {
 		t.Fatalf("should not merge structured content, got %d", len(got))
 	}

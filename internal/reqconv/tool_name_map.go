@@ -51,11 +51,16 @@ func (m *ToolNameMap) Restore(name string) string {
 	return name
 }
 
-// ReverseMap returns the short→original map for use in the response path.
-// Returns nil if no mappings exist.
+// ReverseMap returns a copy of the short→original map for use in the response path.
+// Returns nil if no mappings exist. A copy is returned so callers can freely
+// mutate the result without affecting subsequent Shorten calls.
 func (m *ToolNameMap) ReverseMap() map[string]string {
 	if m == nil || len(m.toOriginal) == 0 {
 		return nil
 	}
-	return m.toOriginal
+	out := make(map[string]string, len(m.toOriginal))
+	for k, v := range m.toOriginal {
+		out[k] = v
+	}
+	return out
 }
