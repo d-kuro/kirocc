@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -32,6 +33,9 @@ func main() {
 func run(ctx context.Context, args []string) error {
 	cfg, err := parseFlags(args)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if err := config.ApplyEnvOverrides(&cfg); err != nil {
