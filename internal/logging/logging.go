@@ -61,8 +61,10 @@ func SessionIDFromContext(ctx context.Context) string {
 	return id
 }
 
-// OTelTraceID converts a UUID trace ID to OTel format (32 hex chars, no hyphens).
-func OTelTraceID(id string) string {
+// NormalizeTraceID converts a UUID-style trace ID (with hyphens) to a flat
+// 32-char hex string compatible with OTel wire format. Calling on an
+// already-normalized value or empty string is a no-op.
+func NormalizeTraceID(id string) string {
 	return strings.ReplaceAll(id, "-", "")
 }
 

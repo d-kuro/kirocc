@@ -54,7 +54,7 @@ func (h *otelHandler) Handle(ctx context.Context, r slog.Record) error {
 	}
 
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
-		rec["traceId"] = OTelTraceID(traceID)
+		rec["traceId"] = NormalizeTraceID(traceID)
 		delete(attrs, "trace_id")
 	}
 

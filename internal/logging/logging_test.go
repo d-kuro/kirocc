@@ -46,7 +46,7 @@ func TestTraceIDs(t *testing.T) {
 	}
 }
 
-func TestOTelTraceID(t *testing.T) {
+func TestNormalizeTraceID(t *testing.T) {
 	tests := []struct {
 		name string
 		id   string
@@ -58,9 +58,9 @@ func TestOTelTraceID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := OTelTraceID(tt.id)
+			got := NormalizeTraceID(tt.id)
 			if got != tt.want {
-				t.Errorf("OTelTraceID(%q) = %q, want %q", tt.id, got, tt.want)
+				t.Errorf("NormalizeTraceID(%q) = %q, want %q", tt.id, got, tt.want)
 			}
 		})
 	}

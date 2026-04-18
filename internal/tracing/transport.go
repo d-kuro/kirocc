@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 	"go.opentelemetry.io/otel/trace"
@@ -56,11 +55,7 @@ func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			if totalSize < 0 {
 				totalSize = len(buf)
 			}
-			span.AddEvent("kiro.request.body", trace.WithAttributes(
-				attribute.String("kiro.request.body", toValidUTF8(buf)),
-				attribute.Bool("kiro.request.body.truncated", t.bodyLimit > 0 && totalSize > t.bodyLimit),
-				attribute.Int("kiro.request.body.size", totalSize),
-			))
+			recordBodyEvent(span, "kiro.request", buf, t.bodyLimit > 0 && totalSize > t.bodyLimit, totalSize)
 		}
 	}
 
