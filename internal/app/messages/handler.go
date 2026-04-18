@@ -219,7 +219,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 // before the stream started (i.e., no bytes written to w yet). Returns "" on success or non-retryable error.
 func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, payload *kiroproto.Payload, creds *auth.Credentials, model, responseModel string, contextWindowSize int, thinking bool, attempt int, toolNameMap map[string]string) string {
 	_, short := logging.TraceIDs(ctx)
-	capture := newUpstreamAttemptCapture(ctx, payload, model, thinking, req.Stream, attempt)
+	capture := newUpstreamAttemptCapture(ctx, s.captureEnabled, payload, model, thinking, req.Stream, attempt)
 
 	apiResp, err := s.client.GenerateAssistantResponse(ctx, creds.AccessToken, payload, creds.Region)
 	if err != nil {

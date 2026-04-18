@@ -19,25 +19,31 @@ func WithOTel(bodyLimit int) ServerOption {
 	}
 }
 
+// WithCapture enables upstream capture logging in the messages service.
+func WithCapture(enabled bool) ServerOption {
+	return func(s *Server) { s.captureEnabled = enabled }
+}
+
 // Server is the HTTP server for the kirocc proxy.
 type Server struct {
-	apiKey        string
-	otel          bool
-	otelBodyLimit int
-	mux           *http.ServeMux
-	messages      *messagesapp.Service
+	apiKey         string
+	otel           bool
+	otelBodyLimit  int
+	captureEnabled bool
+	mux            *http.ServeMux
+	messages       *messagesapp.Service
 }
 
 // New creates a new Server.
 func New(authMgr messagesapp.TokenGetter, apiKey string, client kiroclient.Client, opts ...ServerOption) *Server {
 	s := &Server{
-		apiKey:   apiKey,
-		mux:      http.NewServeMux(),
-		messages: messagesapp.New(authMgr, client),
+		apiKey: apiKey,
+		mux:    http.NewServeMux(),
 	}
 	for _, opt := range opts {
 		opt(s)
 	}
+	s.messages = messagesapp.New(authMgr, client, messagesapp.WithCapture(s.captureEnabled))
 	s.registerRoutes()
 	return s
 }

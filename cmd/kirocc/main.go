@@ -85,6 +85,9 @@ func main() {
 	if cfg.OTel {
 		serverOpts = append(serverOpts, server.WithOTel(cfg.OTelBodyLimit))
 	}
+	if cfg.Debug {
+		serverOpts = append(serverOpts, server.WithCapture(true))
+	}
 	srv := server.New(authMgr, cfg.APIKey, kiroClient, serverOpts...)
 
 	// Eagerly initialize tiktoken so the first API request doesn't block on BPE data fetch.
