@@ -1,8 +1,8 @@
 package respconv
 
-// NormalizeChunk computes the delta between a cumulative chunk and the previous text.
+// ComputeDelta computes the delta between a cumulative chunk and the previous text.
 // Kiro API sends cumulative text, not deltas.
-func NormalizeChunk(chunk, previous string) string {
+func ComputeDelta(chunk, previous string) string {
 	if previous == "" {
 		return chunk
 	}

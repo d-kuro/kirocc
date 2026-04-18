@@ -31,7 +31,7 @@ type EventDelta struct {
 
 // responseAccumulator tracks shared state across streaming and non-streaming response processing.
 type responseAccumulator struct {
-	// Cumulative text trackers for NormalizeChunk.
+	// Cumulative text trackers for ComputeDelta.
 	lastContent  string
 	lastThinking string
 	// Accumulated full text (for non-streaming).
@@ -73,10 +73,10 @@ type responseAccumulator struct {
 	// Thinking tag parser state.
 	thinkingTagInside bool   // currently inside <thinking> tags
 	thinkingTagBuf    string // buffer for partial tag matching across chunk boundaries
-	thinkingTagUsed   bool   // true if <thinking> tags were detected (guards against double-counting with reasoningContentEvent)
-	// FilterToolName, when set, causes ProcessEvent to skip recording tool_use
+	suppressReasoningContent   bool   // true if <thinking> tags were detected (guards against double-counting with reasoningContentEvent)
+	// DropToolName, when set, causes ProcessEvent to skip recording tool_use
 	// events with this name in HasToolUse/ToolCalls (used by tool search orchestrator).
-	FilterToolName string
+	DropToolName string
 	// toolNameMap maps shortened tool names back to originals (short→original).
 	// When set, tool names from Kiro responses are restored before emitting to the client.
 	toolNameMap map[string]string

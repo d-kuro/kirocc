@@ -13,7 +13,7 @@ func (a *responseAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 
 	switch e.Type {
 	case kiroproto.EventAssistantResponse:
-		delta := NormalizeChunk(e.Content, a.lastContent)
+		delta := ComputeDelta(e.Content, a.lastContent)
 		a.lastContent = e.Content
 		if delta != "" && !a.LocalStop {
 			textOut, thinkingOut := a.parseThinkingTags(delta)
@@ -52,10 +52,10 @@ func (a *responseAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 		}
 		// Guard against double-counting: if thinking tags were already parsed
 		// from assistantResponseEvent, skip reasoningContentEvent thinking.
-		if a.thinkingTagUsed {
+		if a.suppressReasoningContent {
 			return d
 		}
-		delta := NormalizeChunk(e.ThinkingText, a.lastThinking)
+		delta := ComputeDelta(e.ThinkingText, a.lastThinking)
 		a.lastThinking = e.ThinkingText
 		if delta != "" && !a.LocalStop {
 			a.accumulateThinking(delta, &d)
@@ -104,7 +104,7 @@ func (a *responseAccumulator) processToolUseEvent(e kiroproto.Event, d *EventDel
 		toolName = mapped
 	}
 	// Skip recording filtered tools (e.g. internal ToolSearch).
-	if a.FilterToolName != "" && e.ToolName == a.FilterToolName {
+	if a.DropToolName != "" && e.ToolName == a.DropToolName {
 		d.ToolStop = true
 		d.ToolUseID = e.ToolUseID
 		d.ToolName = toolName

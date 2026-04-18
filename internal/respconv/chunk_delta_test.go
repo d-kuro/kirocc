@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func TestNormalizeChunk(t *testing.T) {
+func TestComputeDelta(t *testing.T) {
 	tests := []struct {
 		name     string
 		chunk    string
@@ -27,9 +27,9 @@ func TestNormalizeChunk(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := NormalizeChunk(tt.chunk, tt.previous)
+			got := ComputeDelta(tt.chunk, tt.previous)
 			if got != tt.want {
-				t.Errorf("NormalizeChunk(%q, %q) = %q, want %q", tt.chunk, tt.previous, got, tt.want)
+				t.Errorf("ComputeDelta(%q, %q) = %q, want %q", tt.chunk, tt.previous, got, tt.want)
 			}
 		})
 	}

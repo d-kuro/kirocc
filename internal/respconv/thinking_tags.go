@@ -53,7 +53,7 @@ func (a *responseAccumulator) parseThinkingTags(delta string) (textOut, thinking
 			textBuilder.WriteString(a.thinkingTagBuf[:idx])
 			a.thinkingTagBuf = a.thinkingTagBuf[idx+len(thinkingOpenTag):]
 			a.thinkingTagInside = true
-			a.thinkingTagUsed = true
+			a.suppressReasoningContent = true
 			continue
 		}
 		// No open tag found. Check if the tail could be a partial <thinking>.

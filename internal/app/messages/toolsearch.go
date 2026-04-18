@@ -66,7 +66,7 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 			cumulativeOutputTokens += out
 			sw.ResetAccumulator(o.contextWindowSize, o.req.StopSequences, o.req.MaxTokens, 0)
 		}
-		sw.SetFilterToolName(toolsearch.KiroToolSearchName)
+		sw.SetDropToolName(toolsearch.KiroToolSearchName)
 
 		var foundToolSearch bool
 		var toolSearchInput string
@@ -182,7 +182,7 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 		}
 
 		acc := respconv.NewNonStreamingAccumulator(o.contextWindowSize, o.req.StopSequences, o.req.MaxTokens, 0)
-		acc.SetFilterToolName(toolsearch.KiroToolSearchName)
+		acc.SetDropToolName(toolsearch.KiroToolSearchName)
 		acc.SetToolNameMap(nameMap.ReverseMap())
 
 		var hasError bool
