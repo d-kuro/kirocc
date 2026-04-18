@@ -21,13 +21,13 @@ func TestE2E_ResponseModel_NonStreaming(t *testing.T) {
 		{
 			name:         "opus-4-7 hyphen preserved in response",
 			requestModel: "claude-opus-4-7",
-			wantResponse: "claude-opus-4-7",
+			wantResponse: "claude-opus-4-7[1m]",
 			wantUpstream: "claude-opus-4.7",
 		},
 		{
 			name:         "opus-4-6 hyphen preserved in response",
 			requestModel: "claude-opus-4-6",
-			wantResponse: "claude-opus-4-6",
+			wantResponse: "claude-opus-4-6[1m]",
 			wantUpstream: "claude-opus-4.6",
 		},
 		{
@@ -39,8 +39,20 @@ func TestE2E_ResponseModel_NonStreaming(t *testing.T) {
 		{
 			name:         "kiro dotted input is rewritten to anthropic hyphen in response",
 			requestModel: "claude-opus-4.7",
-			wantResponse: "claude-opus-4-7",
+			wantResponse: "claude-opus-4-7[1m]",
 			wantUpstream: "claude-opus-4.7",
+		},
+		{
+			name:         "opus-4-7[1m] exact-match preserved verbatim",
+			requestModel: "claude-opus-4-7[1m]",
+			wantResponse: "claude-opus-4-7[1m]",
+			wantUpstream: "claude-opus-4.7",
+		},
+		{
+			name:         "opus-4-6[1m] exact-match preserved verbatim",
+			requestModel: "claude-opus-4-6[1m]",
+			wantResponse: "claude-opus-4-6[1m]",
+			wantUpstream: "claude-opus-4.6",
 		},
 		{
 			name:         "unknown claude model passthrough",
@@ -94,12 +106,17 @@ func TestE2E_ResponseModel_Streaming(t *testing.T) {
 		{
 			name:         "opus-4-7 hyphen preserved in message_start",
 			requestModel: "claude-opus-4-7",
-			wantResponse: "claude-opus-4-7",
+			wantResponse: "claude-opus-4-7[1m]",
+		},
+		{
+			name:         "opus-4-7[1m] exact-match preserved verbatim in message_start",
+			requestModel: "claude-opus-4-7[1m]",
+			wantResponse: "claude-opus-4-7[1m]",
 		},
 		{
 			name:         "kiro dotted input is rewritten to hyphen in message_start",
 			requestModel: "claude-opus-4.7",
-			wantResponse: "claude-opus-4-7",
+			wantResponse: "claude-opus-4-7[1m]",
 		},
 	}
 
@@ -150,4 +167,78 @@ func extractMessageStartModel(t *testing.T, body io.Reader) string {
 	}
 	t.Fatal("message_start event not found in SSE body")
 	return ""
+}
+
+// TestE2E_ResponseModel_ToolSearch_1M verifies that the tool-search
+// orchestrator threads the `[1m]` suffix through both its streaming
+// message_start event and its final non-streaming JSON body when the
+// resolved context window is 1M.
+func TestE2E_ResponseModel_ToolSearch_1M(t *testing.T) {
+	toolSearchRequest := func(model string, stream bool) string {
+		streamStr := "false"
+		if stream {
+			streamStr = "true"
+		}
+		return `{"model":"` + model + `","max_tokens":16,"stream":` + streamStr + `,` +
+			`"messages":[{"role":"user","content":"hi"}],` +
+			`"tools":[` +
+			`{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex"},` +
+			`{"name":"Read","description":"Read a file","input_schema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]},"defer_loading":true}` +
+			`]}`
+	}
+
+	t.Run("streaming message_start carries [1m] suffix", func(t *testing.T) {
+		p1 := mustJSON(map[string]string{"content": "ok"})
+		client := &capturingClient{events: []any{"assistantResponseEvent", p1}}
+
+		srv := newE2EServer(t, client)
+		defer srv.Close()
+
+		resp := postMessages(t, srv.URL, toolSearchRequest("claude-opus-4-7", true))
+		defer func() { _ = resp.Body.Close() }()
+		requireStatus(t, resp, 200)
+
+		msg := extractMessageStartModel(t, resp.Body)
+		if msg != "claude-opus-4-7[1m]" {
+			t.Errorf("tool-search streaming message_start model = %q, want %q", msg, "claude-opus-4-7[1m]")
+		}
+	})
+
+	t.Run("non-streaming final JSON carries [1m] suffix", func(t *testing.T) {
+		p1 := mustJSON(map[string]string{"content": "ok"})
+		client := &capturingClient{events: []any{"assistantResponseEvent", p1}}
+
+		srv := newE2EServer(t, client)
+		defer srv.Close()
+
+		resp := postMessages(t, srv.URL, toolSearchRequest("claude-opus-4-7", false))
+		defer func() { _ = resp.Body.Close() }()
+		requireStatus(t, resp, 200)
+
+		var result map[string]any
+		if err := json.UnmarshalRead(resp.Body, &result); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		gotModel, _ := result["model"].(string)
+		if gotModel != "claude-opus-4-7[1m]" {
+			t.Errorf("tool-search non-streaming response model = %q, want %q", gotModel, "claude-opus-4-7[1m]")
+		}
+	})
+
+	t.Run("exact-match [1m] input preserved in streaming message_start", func(t *testing.T) {
+		p1 := mustJSON(map[string]string{"content": "ok"})
+		client := &capturingClient{events: []any{"assistantResponseEvent", p1}}
+
+		srv := newE2EServer(t, client)
+		defer srv.Close()
+
+		resp := postMessages(t, srv.URL, toolSearchRequest("claude-opus-4-7[1m]", true))
+		defer func() { _ = resp.Body.Close() }()
+		requireStatus(t, resp, 200)
+
+		msg := extractMessageStartModel(t, resp.Body)
+		if msg != "claude-opus-4-7[1m]" {
+			t.Errorf("tool-search streaming message_start model = %q, want %q", msg, "claude-opus-4-7[1m]")
+		}
+	})
 }

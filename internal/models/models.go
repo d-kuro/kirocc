@@ -27,6 +27,8 @@ const (
 // Uses exact key matching against both Anthropic and Kiro fields (first match wins).
 // Order matters: specific entries must precede legacy aliases that share the same Kiro value.
 var modelMapOrdered = []Mapping{
+	{Anthropic: "claude-opus-4-7[1m]", Kiro: "claude-opus-4.7", Kiro1M: "claude-opus-4.7"},
+	{Anthropic: "claude-opus-4-6[1m]", Kiro: "claude-opus-4.6", Kiro1M: "claude-opus-4.6"},
 	{Anthropic: "claude-opus-4-7", Kiro: "claude-opus-4.7", Kiro1M: "claude-opus-4.7"},
 	{Anthropic: "claude-sonnet-4-6", Kiro: "claude-sonnet-4.6", Kiro1M: "claude-sonnet-4.6-1m"},
 	{Anthropic: "claude-sonnet-4.5", Kiro: "claude-sonnet-4.5", Kiro1M: "claude-sonnet-4.5-1m"},
@@ -92,25 +94,33 @@ func effectiveMappings() []Mapping {
 
 // Resolve maps an Anthropic or Kiro model name to the Kiro SKU sent upstream,
 // the thinking flag, the context window size, and the Anthropic-form ID to
-// echo back in /v1/messages responses. Returning the Anthropic-form ID matters
-// because Claude Code decides context window size by matching the response's
-// model against its own hyphenated-ID table; the dotted Kiro SKU would miss.
-// KIROCC_MODEL_MAPPINGS env var can override mappings.
+// echo back in /v1/messages responses.
+//
+// Lookup is two-tier:
+//  1. Exact match against `m.Anthropic` / `m.Kiro` first (no `[1m]` strip).
+//     This catches always-1M aliases like `claude-opus-4-7[1m]` that are a
+//     context-window advertisement, not a thinking opt-in — the suffix is
+//     preserved verbatim in `anthropicModel` and `thinking` stays false.
+//  2. If no exact match, strip a trailing `[1m]` from the input, set
+//     `thinking = true`, and retry the lookup. This is the legacy path
+//     used by aliases that don't have an explicit `[1m]` entry (e.g.
+//     `claude-sonnet-4-6[1m]` routes to the `-1m` Kiro SKU with thinking).
+//
+// The output `anthropicModel` gets a trailing `[1m]` when the routed
+// context window is 1M (regardless of thinking), so Claude Code's
+// `mR()` / `A2()` picks the 1M window even if the input was bare.
+//
+// Upstream `kiroModel` is never `[1m]`-suffixed — it always comes from
+// mapping tables. KIROCC_MODEL_MAPPINGS env var can override mappings.
 func Resolve(model string, context1M bool) (kiroModel string, thinking bool, contextWindowSize int, anthropicModel string) {
-	// Strip thinking suffix
-	if before, ok := strings.CutSuffix(model, ThinkingSuffix); ok {
-		model = before
-		thinking = true
-	}
-	if context1M {
-		thinking = true
-	}
-
 	var matchedWindowSize int
 	var matchedKiro1M string
 	var matchedAnthropic string
 	var matched bool
-	for _, m := range effectiveMappings() {
+
+	// Tier 1: exact match (no strip). Handles `claude-opus-4-7[1m]` etc.
+	mappings := effectiveMappings()
+	for _, m := range mappings {
 		if model == m.Anthropic || model == m.Kiro {
 			kiroModel = m.Kiro
 			matchedKiro1M = m.Kiro1M
@@ -119,6 +129,28 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 			matched = true
 			break
 		}
+	}
+
+	// Tier 2: strip `[1m]` (treated as thinking opt-in) and retry.
+	if !matched {
+		if before, ok := strings.CutSuffix(model, ThinkingSuffix); ok {
+			model = before
+			thinking = true
+			for _, m := range mappings {
+				if model == m.Anthropic || model == m.Kiro {
+					kiroModel = m.Kiro
+					matchedKiro1M = m.Kiro1M
+					matchedWindowSize = m.ContextWindowSize
+					matchedAnthropic = m.Anthropic
+					matched = true
+					break
+				}
+			}
+		}
+	}
+
+	if context1M {
+		thinking = true
 	}
 
 	if !matched {
@@ -150,6 +182,13 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 		contextWindowSize = matchedWindowSize
 	default:
 		contextWindowSize = DefaultContextWindowSize
+	}
+
+	// Advertise 1M context to Claude Code by appending ThinkingSuffix to the
+	// response model ID. Guarded against double-suffix when a user-supplied
+	// env override specifies an already-suffixed anthropic value.
+	if contextWindowSize == ThinkingContextWindowSize && !strings.HasSuffix(anthropicModel, ThinkingSuffix) {
+		anthropicModel += ThinkingSuffix
 	}
 
 	return kiroModel, thinking, contextWindowSize, anthropicModel
