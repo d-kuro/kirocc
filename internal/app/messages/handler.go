@@ -2,14 +2,12 @@ package messages
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/auth"
-	"github.com/d-kuro/kirocc/internal/kiroproto"
+	"github.com/d-kuro/kirocc/internal/httpx"
 	"github.com/d-kuro/kirocc/internal/logging"
 	"github.com/d-kuro/kirocc/internal/models"
 	"github.com/d-kuro/kirocc/internal/reqconv"
@@ -19,140 +17,57 @@ import (
 const headerCCSessionID = "X-Claude-Code-Session-Id"
 
 func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
-	traceID, short := logging.TraceIDs(r.Context())
+	ctx := r.Context()
+	traceID, short := logging.TraceIDs(ctx)
 
-	req, err := parseAndValidateRequest(r.Context(), w, r)
+	req, err := parseAndValidateRequest(ctx, w, r)
 	if err != nil {
-		slog.WarnContext(r.Context(), "invalid request",
-			"trace_id", short, "err", err)
-		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
+		slog.WarnContext(ctx, "invalid request", "trace_id", short, "err", err)
+		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 		return
 	}
 
 	ccSessionID := r.Header.Get(headerCCSessionID)
 	if ccSessionID == "" {
-		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, "missing "+headerCCSessionID+" header")
+		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, "missing "+headerCCSessionID+" header")
 		return
 	}
-	ctx := logging.WithSessionID(r.Context(), ccSessionID)
+	ctx = logging.WithSessionID(ctx, ccSessionID)
 	r = r.WithContext(ctx)
 
-	slog.DebugContext(r.Context(), "client request headers",
+	slog.DebugContext(ctx, "client request headers",
 		"trace_id", traceID,
 		"session_id", ccSessionID,
 		"headers", logging.SafeHeaders{H: r.Header},
 	)
 
-	creds, err := s.auth.GetToken(r.Context())
+	creds, err := s.auth.GetToken(ctx)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "auth error",
-			"trace_id", short, "err", err)
-		WriteErrorJSON(w, http.StatusUnauthorized, ErrTypeAuthentication, "authentication failed")
+		slog.ErrorContext(ctx, "auth error", "trace_id", short, "err", err)
+		httpx.WriteError(w, http.StatusUnauthorized, ErrTypeAuthentication, "authentication failed")
 		return
 	}
 
-	kiroModel, thinking, contextWindowSize, anthropicModel := models.Resolve(req.Model, hasContext1MBeta(r.Header))
-
-	// Also check the request's thinking field (Anthropic API standard).
+	kiroModel, thinking, contextWindowSize, anthropicModel := models.Resolve(req.Model, anthropic.HasContext1MBeta(r.Header))
 	if req.IsThinkingEnabled() {
 		thinking = true
 	}
 
-	contextWindow := fmt.Sprintf("%dk", contextWindowSize/1000)
-	if contextWindowSize >= 1_000_000 {
-		contextWindow = fmt.Sprintf("%dM", contextWindowSize/1_000_000)
-	}
-	var thinkingLog any = false
-	if thinking {
-		if effort := req.Effort(); effort != "" {
-			thinkingLog = effort
-		} else {
-			thinkingLog = "enabled"
-		}
-	}
-	slog.InfoContext(r.Context(), "--> POST /v1/messages",
-		"trace_id", short,
-		"session_id", logging.ShortID(ccSessionID),
-		"model", kiroModel,
-		"thinking", thinkingLog,
-		"stream", req.Stream,
-		"context_window", contextWindow,
-	)
+	s.logRequest(ctx, short, ccSessionID, kiroModel, contextWindowSize, req, thinking)
 
-	thinkingBudget := 0
-	if req.Thinking != nil {
-		thinkingBudget = req.Thinking.BudgetTokens
-		// When budget_tokens is not explicitly set, derive from effort level.
-		if thinkingBudget <= 0 {
-			effort := req.Effort()
-			switch effort {
-			case anthropic.EffortMax:
-				thinkingBudget = anthropic.ThinkingBudgetMax
-			case anthropic.EffortXHigh:
-				thinkingBudget = anthropic.ThinkingBudgetXHigh
-			case anthropic.EffortHigh:
-				thinkingBudget = anthropic.ThinkingBudgetHigh
-			case anthropic.EffortLow:
-				thinkingBudget = anthropic.ThinkingBudgetLow
-			default: // "medium" or unset
-				if effort != "" && effort != anthropic.EffortMedium {
-					slog.WarnContext(r.Context(), "unknown effort level, falling back to medium",
-						"trace_id", short, "effort", effort)
-				}
-				thinkingBudget = anthropic.ThinkingBudgetMedium
-			}
-		}
-	}
+	thinkingBudget := resolveThinkingBudget(ctx, req)
 
-	// Check for tool search tools and delegate to orchestrator if found.
-	tsCtx := toolsearch.NewContext(req.Tools)
-	if tsCtx != nil {
-		// Promote deferred tools referenced in conversation history.
+	// Tool search short-circuits to the orchestrator, which has its own retry loop.
+	if tsCtx := toolsearch.NewContext(req.Tools); tsCtx != nil {
 		refs := reqconv.ExtractToolReferences(req.Messages)
 		tsCtx.PromoteTools(refs)
-
-		slog.InfoContext(r.Context(), "tool search enabled",
+		slog.InfoContext(ctx, "tool search enabled",
 			"trace_id", short,
 			"search_type", tsCtx.SearchType,
 			"deferred_tools", len(tsCtx.DeferredTools),
 			"active_tools", len(tsCtx.ActiveTools),
 		)
-
-		orch := &toolSearchOrchestrator{
-			service: s,
-			tsCtx:   tsCtx,
-			req:     req,
-			creds:   creds,
-			buildOpts: reqconv.BuildOptions{
-				ProfileARN:     creds.ProfileARN,
-				ModelID:        kiroModel,
-				ConversationID: ccSessionID,
-				Thinking:       thinking,
-				ThinkingBudget: thinkingBudget,
-				ToolSearchCtx:  tsCtx,
-			},
-			contextWindowSize: contextWindowSize,
-			responseModel:     anthropicModel,
-		}
-		var retryReason string
-		if req.Stream {
-			retryReason = orch.handleStreaming(r.Context(), w)
-		} else {
-			retryReason = orch.handleNonStreaming(r.Context(), w)
-		}
-		if retryReason == retryReasonEmptyVisibleEndTurn {
-			slog.WarnContext(r.Context(), "retrying tool search after empty visible end_turn", "trace_id", short)
-			var reason string
-			if req.Stream {
-				reason = orch.handleStreaming(r.Context(), w)
-			} else {
-				reason = orch.handleNonStreaming(r.Context(), w)
-			}
-			if reason == retryReasonEmptyVisibleEndTurn {
-				slog.ErrorContext(r.Context(), "tool search retry also returned empty visible end_turn", "trace_id", short)
-				WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream returned empty response")
-			}
-		}
+		s.runToolSearch(ctx, w, req, creds, tsCtx, kiroModel, anthropicModel, contextWindowSize, thinking, thinkingBudget, ccSessionID, short)
 		return
 	}
 
@@ -164,95 +79,68 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		ThinkingBudget: thinkingBudget,
 	})
 	if err != nil {
-		slog.WarnContext(r.Context(), "payload build error",
-			"trace_id", short, "err", err)
-		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
-		return
-	}
-	reverseMap := nameMap.ReverseMap()
-
-	retryReason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, anthropicModel, contextWindowSize, thinking, 1, reverseMap)
-	if retryReason == "" {
+		slog.WarnContext(ctx, "payload build error", "trace_id", short, "err", err)
+		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 		return
 	}
 
-	// Handle empty visible end_turn: retry with the same payload.
-	// The thinking-only response is typically a transient upstream issue,
-	// so we retry as-is without disabling thinking.
-	if retryReason == retryReasonEmptyVisibleEndTurn {
-		slog.WarnContext(r.Context(), "retrying after empty visible end_turn",
-			"trace_id", short,
-			"reason", retryReason,
-		)
-		// Clear IDs to break out of stuck conversation state.
-		payload.ConversationState.ConversationID = ""
-		reason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, anthropicModel, contextWindowSize, thinking, 2, reverseMap)
-		if reason == "" {
-			return
+	s.executeWithRetry(ctx, w, &invocation{
+		req:               req,
+		payload:           payload,
+		creds:             creds,
+		model:             kiroModel,
+		responseModel:     anthropicModel,
+		contextWindowSize: contextWindowSize,
+		thinking:          thinking,
+		toolNameMap:       nameMap.ReverseMap(),
+	})
+}
+
+// logRequest emits the "--> POST /v1/messages" info log summarizing the call.
+func (s *Service) logRequest(ctx context.Context, short, ccSessionID, kiroModel string, contextWindowSize int, req *anthropic.Request, thinking bool) {
+	var thinkingLog any = false
+	if thinking {
+		if effort := req.Effort(); effort != "" {
+			thinkingLog = effort
+		} else {
+			thinkingLog = "enabled"
 		}
-		if reason == retryReasonEmptyVisibleEndTurn {
-			slog.ErrorContext(r.Context(), "retry also returned empty visible end_turn",
-				"trace_id", short, "reason", reason)
-			WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream returned empty response")
-			return
-		}
-		// Retry returned a different error (e.g. invalid state) — report it as-is.
-		slog.ErrorContext(r.Context(), "retry failed with different reason",
-			"trace_id", short, "reason", reason)
-		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, "invalid state: "+reason)
-		return
 	}
-
-	// Retry once with cleared conversation ID.
-	slog.WarnContext(r.Context(), "retrying with cleared conversation ID",
+	slog.InfoContext(ctx, "--> POST /v1/messages",
 		"trace_id", short,
-		"reason", retryReason,
+		"session_id", logging.ShortID(ccSessionID),
+		"model", kiroModel,
+		"thinking", thinkingLog,
+		"stream", req.Stream,
+		"context_window", formatContextWindow(contextWindowSize),
 	)
-	payload.ConversationState.ConversationID = ""
-	if reason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, anthropicModel, contextWindowSize, thinking, 2, reverseMap); reason != "" {
-		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, "invalid state: "+reason)
-	}
 }
 
-// callAndHandle calls the Kiro API and handles the response.
-// Returns a non-empty reason string if the request failed with a retryable invalidStateEvent
-// before the stream started (i.e., no bytes written to w yet). Returns "" on success or non-retryable error.
-func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, payload *kiroproto.Payload, creds *auth.Credentials, model, responseModel string, contextWindowSize int, thinking bool, attempt int, toolNameMap map[string]string) string {
-	_, short := logging.TraceIDs(ctx)
-	capture := newUpstreamAttemptCapture(ctx, payload, model, thinking, req.Stream, attempt)
-
-	apiResp, err := s.client.GenerateAssistantResponse(ctx, creds.AccessToken, payload, creds.Region)
-	if err != nil {
-		logUpstreamError(ctx, short, err)
-		WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream API error")
-		return ""
+// runToolSearch wires up the orchestrator and retries once on empty-visible end_turn.
+func (s *Service) runToolSearch(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, creds *auth.Credentials, tsCtx *toolsearch.Context, kiroModel, responseModel string, contextWindowSize int, thinking bool, thinkingBudget int, ccSessionID, short string) {
+	orch := &toolSearchOrchestrator{
+		service: s,
+		tsCtx:   tsCtx,
+		req:     req,
+		creds:   creds,
+		buildOpts: reqconv.BuildOptions{
+			ProfileARN:     creds.ProfileARN,
+			ModelID:        kiroModel,
+			ConversationID: ccSessionID,
+			Thinking:       thinking,
+			ThinkingBudget: thinkingBudget,
+			ToolSearchCtx:  tsCtx,
+		},
+		contextWindowSize: contextWindowSize,
+		responseModel:     responseModel,
 	}
-	body := apiResp.Body
-	defer func() { _ = body.Close() }()
-	if capture != nil {
-		capture.setResponseHeaders(apiResp.Header)
+	reason := orch.run(ctx, w)
+	if reason != retryReasonEmptyVisibleEndTurn {
+		return
 	}
-
-	var reason string
-	if req.Stream {
-		reason = s.handleStreamingResponse(ctx, w, apiResp, responseModel, contextWindowSize, req.StopSequences, req.MaxTokens, apiResp.PromptTokens, capture, toolNameMap)
-	} else {
-		reason = s.handleNonStreamingResponse(ctx, w, apiResp, responseModel, contextWindowSize, req.StopSequences, req.MaxTokens, apiResp.PromptTokens, capture, toolNameMap)
+	slog.WarnContext(ctx, "retrying tool search after empty visible end_turn", "trace_id", short)
+	if r2 := orch.run(ctx, w); r2 == retryReasonEmptyVisibleEndTurn {
+		slog.ErrorContext(ctx, "tool search retry also returned empty visible end_turn", "trace_id", short)
+		httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream returned empty response")
 	}
-	if reason == retryReasonEmptyVisibleEndTurn {
-		capture.logCapture(ctx, reason)
-	}
-	return reason
-}
-
-// hasContext1MBeta checks if the Anthropic-Beta header contains a context-1m flag.
-func hasContext1MBeta(h http.Header) bool {
-	for _, v := range h["Anthropic-Beta"] {
-		for beta := range strings.SplitSeq(v, ",") {
-			if strings.HasPrefix(strings.TrimSpace(beta), "context-1m") {
-				return true
-			}
-		}
-	}
-	return false
 }

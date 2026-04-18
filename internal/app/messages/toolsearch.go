@@ -3,6 +3,7 @@ package messages
 import (
 	"context"
 	"encoding/json/v2"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/auth"
+	"github.com/d-kuro/kirocc/internal/httpx"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 	"github.com/d-kuro/kirocc/internal/logging"
 	"github.com/d-kuro/kirocc/internal/reqconv"
@@ -29,6 +31,16 @@ type toolSearchOrchestrator struct {
 	buildOpts         reqconv.BuildOptions
 	contextWindowSize int
 	responseModel     string
+}
+
+// run dispatches to the streaming or non-streaming implementation based on
+// req.Stream. Returns retryReasonEmptyVisibleEndTurn when the upstream
+// produced thinking-only output and the call site should retry.
+func (o *toolSearchOrchestrator) run(ctx context.Context, w http.ResponseWriter) string {
+	if o.req.Stream {
+		return o.handleStreaming(ctx, w)
+	}
+	return o.handleNonStreaming(ctx, w)
 }
 
 func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.ResponseWriter) string {
@@ -65,7 +77,7 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 			cumulativeOutputTokens += out
 			sw.ResetAccumulator(o.contextWindowSize, o.req.StopSequences, o.req.MaxTokens, 0)
 		}
-		sw.SetFilterToolName(toolsearch.KiroToolSearchName)
+		sw.SetDropToolName(toolsearch.KiroToolSearchName)
 
 		var foundToolSearch bool
 		var toolSearchInput string
@@ -119,7 +131,7 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 			}
 			if streamErr && !gw.IsPromoted() {
 				gw.Discard()
-				WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream stream error")
+				httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream stream error")
 			}
 			if !streamErr {
 				inputTokens, outputTokens := sw.Usage()
@@ -129,7 +141,12 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 		}
 
 		// ToolSearch detected — execute search and emit SSE blocks.
-		query, maxResults := parseToolSearchInput(toolSearchInput)
+		query, maxResults, parseErr := parseToolSearchInput(toolSearchInput)
+		if parseErr != nil {
+			slog.WarnContext(ctx, "tool search input parse error", "trace_id", short, "err", parseErr)
+			writeStreamingOrJSONError(gw, sw, w, http.StatusBadRequest, errTypeInvalidRequest, parseErr.Error())
+			return ""
+		}
 		srvToolUseID := "srvtoolu_" + uuid.New().String()[:24]
 		searchInput := buildSearchInput(query, maxResults)
 
@@ -169,19 +186,19 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 	for round := range maxToolSearchRounds {
 		payload, nameMap, err := o.buildPayload(msgs)
 		if err != nil {
-			WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
+			httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 			return ""
 		}
 
 		apiResp, err := o.service.client.GenerateAssistantResponse(ctx, o.creds.AccessToken, payload, o.creds.Region)
 		if err != nil {
 			logUpstreamError(ctx, short, err, "round", round+1)
-			WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream API error")
+			httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream API error")
 			return ""
 		}
 
 		acc := respconv.NewNonStreamingAccumulator(o.contextWindowSize, o.req.StopSequences, o.req.MaxTokens, 0)
-		acc.SetFilterToolName(toolsearch.KiroToolSearchName)
+		acc.SetDropToolName(toolsearch.KiroToolSearchName)
 		acc.SetToolNameMap(nameMap.ReverseMap())
 
 		var hasError bool
@@ -203,7 +220,7 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 		_ = apiResp.Body.Close()
 
 		if (err != nil || hasError) && !foundToolSearch {
-			WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream error")
+			httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream error")
 			return ""
 		}
 
@@ -228,7 +245,12 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 		}
 
 		// Execute search.
-		query, maxResults := parseToolSearchInput(nsToolSearchInput)
+		query, maxResults, parseErr := parseToolSearchInput(nsToolSearchInput)
+		if parseErr != nil {
+			slog.WarnContext(ctx, "tool search input parse error", "trace_id", short, "err", parseErr)
+			httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, parseErr.Error())
+			return ""
+		}
 
 		srvToolUseID := "srvtoolu_" + uuid.New().String()[:24]
 		results, searchErr := o.executeSearch(ctx, short, round, query, maxResults)
@@ -367,17 +389,18 @@ func writeStreamingOrJSONError(gw *GateWriter, sw *respconv.SSEWriter, w http.Re
 	if !gw.IsPromoted() {
 		gw.Discard()
 	}
-	WriteErrorJSON(w, status, errType, message)
+	httpx.WriteError(w, status, errType, message)
 }
 
 // parseToolSearchInput extracts query and max_results from the ToolSearch tool input JSON.
-func parseToolSearchInput(input string) (query string, maxResults int) {
+// Returns an error if the input is not valid JSON.
+func parseToolSearchInput(input string) (query string, maxResults int, err error) {
 	var parsed struct {
 		Query      string  `json:"query"`
 		MaxResults float64 `json:"max_results"`
 	}
-	if err := json.Unmarshal([]byte(input), &parsed); err != nil {
-		return input, 0
+	if uerr := json.Unmarshal([]byte(input), &parsed); uerr != nil {
+		return "", 0, fmt.Errorf("parse tool_search input: %w", uerr)
 	}
-	return parsed.Query, int(parsed.MaxResults)
+	return parsed.Query, int(parsed.MaxResults), nil
 }

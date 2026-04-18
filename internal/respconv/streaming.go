@@ -9,7 +9,6 @@ import (
 
 	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
-	"github.com/d-kuro/kirocc/internal/toolsearch"
 	"github.com/google/uuid"
 )
 
@@ -183,16 +182,14 @@ func (s *SSEWriter) WriteError(errType, message string) {
 func (s *SSEWriter) Finish() {
 	s.ensureStarted()
 
-	// 1. Finalize thinking tags and stop sequence buffers.
-	if textDelta, thinkingDelta := s.acc.FinalizeStream(); textDelta != "" || thinkingDelta != "" {
-		if thinkingDelta != "" {
-			s.writeThinkingDelta(EventDelta{ThinkingDelta: thinkingDelta})
-		}
-		if textDelta != "" {
-			s.fireVisibleOutput()
-			s.switchBlock(anthropic.BlockTypeText)
-			s.writeDelta("text_delta", "text", textDelta)
-		}
+	textDelta, thinkingDelta, res := finalizeResult(&s.acc)
+	if thinkingDelta != "" {
+		s.writeThinkingDelta(EventDelta{ThinkingDelta: thinkingDelta})
+	}
+	if textDelta != "" {
+		s.fireVisibleOutput()
+		s.switchBlock(anthropic.BlockTypeText)
+		s.writeDelta("text_delta", "text", textDelta)
 	}
 
 	s.closeActiveBlock()
@@ -201,16 +198,13 @@ func (s *SSEWriter) Finish() {
 	// response, the caller (GateWriter) will detect it via IsEmptyVisibleEndTurn
 	// and retry the request instead.
 
-	stopReason, stopSequence := s.acc.resolveStopReason()
-
-	inputTokens, outputTokens := s.acc.resolvedUsage()
 	s.writeSSE("message_delta", map[string]any{
 		"type": "message_delta",
 		"delta": map[string]any{
-			"stop_reason":   stopReason,
-			"stop_sequence": stopSequence,
+			"stop_reason":   res.StopReason,
+			"stop_sequence": res.StopSequence,
 		},
-		"usage": s.acc.UsageMap(inputTokens, outputTokens),
+		"usage": res.Usage,
 	})
 	s.writeSSE("message_stop", map[string]any{
 		"type": "message_stop",
@@ -277,6 +271,27 @@ func (s *SSEWriter) closeActiveBlock() {
 	s.activeType = ""
 }
 
+// writeBlock emits the content_block_start → [content_block_delta] → content_block_stop
+// sequence for a single self-contained block (tool_use, server_tool_use, tool_search results).
+// closes any previously active block first. delta may be nil when no delta event is needed.
+func (s *SSEWriter) writeBlock(contentBlock, delta map[string]any) {
+	s.closeActiveBlock()
+	s.blockIndex++
+	s.writeSSE("content_block_start", map[string]any{
+		"type":          "content_block_start",
+		"index":         s.blockIndex,
+		"content_block": contentBlock,
+	})
+	if delta != nil {
+		s.writeSSE("content_block_delta", map[string]any{
+			"type":  "content_block_delta",
+			"index": s.blockIndex,
+			"delta": delta,
+		})
+	}
+	s.writeRawSSE("content_block_stop", `{"type":"content_block_stop","index":%d}`, s.blockIndex)
+}
+
 // Usage returns the best available input and output token counts.
 func (s *SSEWriter) Usage() (inputTokens, outputTokens int) {
 	return s.acc.resolvedUsage()
@@ -324,9 +339,9 @@ func (s *SSEWriter) ThinkingLen() int {
 	return s.acc.ThinkingBuf.Len()
 }
 
-// SetFilterToolName sets the tool name to filter from accumulator recording.
-func (s *SSEWriter) SetFilterToolName(name string) {
-	s.acc.FilterToolName = name
+// SetDropToolName sets the tool name to filter from accumulator recording.
+func (s *SSEWriter) SetDropToolName(name string) {
+	s.acc.DropToolName = name
 }
 
 // SetToolNameMap sets the short→original tool name map for response remapping.
@@ -337,77 +352,12 @@ func (s *SSEWriter) SetToolNameMap(m map[string]string) {
 // ResetAccumulator replaces the internal accumulator with a fresh one,
 // preserving the SSEWriter's block index and started state for continuation.
 func (s *SSEWriter) ResetAccumulator(contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int) {
-	filterName := s.acc.FilterToolName
+	filterName := s.acc.DropToolName
 	nameMap := s.acc.toolNameMap
 	s.acc = newAccumulator(contextWindowSize, stopSequences, maxTokens, preCountedInputTokens)
-	s.acc.FilterToolName = filterName
+	s.acc.DropToolName = filterName
 	s.acc.toolNameMap = nameMap
 	s.activeType = ""
-}
-
-// WriteServerToolUse writes a server_tool_use content block start + input delta + stop.
-func (s *SSEWriter) WriteServerToolUse(id, name, input string) {
-	s.ensureStarted()
-	s.fireVisibleOutput()
-	s.closeActiveBlock()
-	s.blockIndex++
-	s.writeSSE("content_block_start", map[string]any{
-		"type":  "content_block_start",
-		"index": s.blockIndex,
-		"content_block": map[string]any{
-			"type":  anthropic.BlockTypeServerToolUse,
-			"id":    id,
-			"name":  name,
-			"input": map[string]any{},
-		},
-	})
-	s.writeSSE("content_block_delta", map[string]any{
-		"type":  "content_block_delta",
-		"index": s.blockIndex,
-		"delta": map[string]any{
-			"type":         "input_json_delta",
-			"partial_json": input,
-		},
-	})
-	s.writeRawSSE("content_block_stop", `{"type":"content_block_stop","index":%d}`, s.blockIndex)
-}
-
-// WriteToolSearchResult writes a tool_search_tool_result content block.
-func (s *SSEWriter) WriteToolSearchResult(toolUseID string, toolRefs []string) {
-	s.closeActiveBlock()
-	s.blockIndex++
-	s.writeSSE("content_block_start", map[string]any{
-		"type":  "content_block_start",
-		"index": s.blockIndex,
-		"content_block": map[string]any{
-			"type":        anthropic.BlockTypeToolSearchToolResult,
-			"tool_use_id": toolUseID,
-			"content": map[string]any{
-				"type":            anthropic.BlockTypeToolSearchSearchResult,
-				"tool_references": toolsearch.ToolRefMaps(toolRefs),
-			},
-		},
-	})
-	s.writeRawSSE("content_block_stop", `{"type":"content_block_stop","index":%d}`, s.blockIndex)
-}
-
-// WriteToolSearchError writes a tool_search_tool_result error content block.
-func (s *SSEWriter) WriteToolSearchError(toolUseID string, errorCode string) {
-	s.closeActiveBlock()
-	s.blockIndex++
-	s.writeSSE("content_block_start", map[string]any{
-		"type":  "content_block_start",
-		"index": s.blockIndex,
-		"content_block": map[string]any{
-			"type":        anthropic.BlockTypeToolSearchToolResult,
-			"tool_use_id": toolUseID,
-			"content": map[string]any{
-				"type":       anthropic.BlockTypeToolSearchResultError,
-				"error_code": errorCode,
-			},
-		},
-	})
-	s.writeRawSSE("content_block_stop", `{"type":"content_block_stop","index":%d}`, s.blockIndex)
 }
 
 func (s *SSEWriter) writeSSE(eventType string, data map[string]any) {

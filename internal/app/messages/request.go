@@ -11,6 +11,7 @@ import (
 	"net/http"
 
 	"github.com/d-kuro/kirocc/internal/anthropic"
+	"github.com/d-kuro/kirocc/internal/httpx"
 	"github.com/d-kuro/kirocc/internal/models"
 	"github.com/d-kuro/kirocc/internal/reqconv"
 	"github.com/d-kuro/kirocc/internal/tokencount"
@@ -20,16 +21,18 @@ import (
 func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 	req, err := parseAndValidateRequest(r.Context(), w, r)
 	if err != nil {
-		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
+		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 		return
 	}
 
 	profileARN := ""
 	if creds, err := s.auth.GetToken(r.Context()); err == nil {
 		profileARN = creds.ProfileARN
+	} else {
+		slog.DebugContext(r.Context(), "count_tokens proceeding without credentials", "err", err)
 	}
 
-	kiroModel, thinking, _, _ := models.Resolve(req.Model, hasContext1MBeta(r.Header))
+	kiroModel, thinking, _, _ := models.Resolve(req.Model, anthropic.HasContext1MBeta(r.Header))
 	if req.IsThinkingEnabled() {
 		thinking = true
 	}
@@ -38,19 +41,19 @@ func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 
 	payload, _, err := reqconv.BuildPayload(req, reqconv.BuildOptions{ProfileARN: profileARN, ModelID: kiroModel, ConversationID: ccSessionID, Thinking: thinking, ThinkingBudget: 0})
 	if err != nil {
-		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
+		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 		return
 	}
 
 	data, err := json.Marshal(payload)
 	if err != nil {
-		WriteErrorJSON(w, http.StatusInternalServerError, errTypeAPI, "failed to serialize payload")
+		httpx.WriteError(w, http.StatusInternalServerError, errTypeAPI, "failed to serialize payload")
 		return
 	}
 
 	n, err := tokencount.CountBytes(data)
 	if err != nil {
-		WriteErrorJSON(w, http.StatusInternalServerError, errTypeAPI, "token counting unavailable")
+		httpx.WriteError(w, http.StatusInternalServerError, errTypeAPI, "token counting unavailable")
 		return
 	}
 

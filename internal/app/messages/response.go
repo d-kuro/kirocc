@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/d-kuro/kirocc/internal/httpx"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 	"github.com/d-kuro/kirocc/internal/logging"
@@ -154,7 +155,7 @@ func (s *Service) handleNonStreamingResponse(ctx context.Context, w http.Respons
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "stream parse error", "trace_id", short, "err", err)
-		WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream stream error")
+		httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream stream error")
 		return ""
 	}
 

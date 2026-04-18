@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	messagesapp "github.com/d-kuro/kirocc/internal/app/messages"
+	"github.com/d-kuro/kirocc/internal/httpx"
 	"github.com/d-kuro/kirocc/internal/logging"
 	"github.com/d-kuro/kirocc/internal/tracing"
 )
@@ -36,7 +36,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		authHeader := r.Header.Get("Authorization")
 		token, ok := strings.CutPrefix(authHeader, "Bearer ")
 		if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(s.apiKey)) != 1 {
-			messagesapp.WriteErrorJSON(w, http.StatusUnauthorized, messagesapp.ErrTypeAuthentication, "invalid API key")
+			httpx.WriteError(w, http.StatusUnauthorized, httpx.ErrTypeAuthentication, "invalid API key")
 			return
 		}
 		next.ServeHTTP(w, r)

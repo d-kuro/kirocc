@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"strconv"
 	"strings"
-	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -50,7 +48,7 @@ func ReadCredentials(db *sql.DB) (*Credentials, error) {
 
 	// Read token from auth_kv table.
 	// Priority: kirocli:social → kirocli:odic/oidc → codewhisperer:odic/oidc
-	tokenJSON, authType, err := readAuthKVMulti(db, []string{
+	tokenJSON, authType, err := findFirstAuthKV(db, []string{
 		"kirocli:social:token",
 		"kirocli:odic:token",
 		"kirocli:oidc:token",
@@ -81,7 +79,7 @@ func ReadCredentials(db *sql.DB) (*Credentials, error) {
 
 	// Read device registration.
 	// Try both hyphen and underscore variants, and both odic/oidc spellings.
-	regJSON, _, err := readAuthKVMulti(db, []string{
+	regJSON, _, err := findFirstAuthKV(db, []string{
 		"kirocli:social:device-registration",
 		"kirocli:odic:device-registration",
 		"kirocli:oidc:device-registration",
@@ -134,9 +132,9 @@ func ReadCredentials(db *sql.DB) (*Credentials, error) {
 	return creds, nil
 }
 
-// readAuthKVMulti fetches all matching keys in a single query, then returns
+// findFirstAuthKV fetches all matching keys in a single query, then returns
 // the value of the highest-priority key (earliest in the keys slice).
-func readAuthKVMulti(db *sql.DB, keys []string) (string, string, error) {
+func findFirstAuthKV(db *sql.DB, keys []string) (string, string, error) {
 	if len(keys) == 0 {
 		return "", "", ErrNoCredentials
 	}
@@ -194,63 +192,4 @@ func readState(db *sql.DB, key string) (string, error) {
 		return unquoted, nil
 	}
 	return value, nil
-}
-
-// coalesce returns the first non-empty string.
-func coalesce(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
-}
-
-// parseExpiresAt extracts an int64 timestamp from values that may be int, float, or string.
-func parseExpiresAt(vals ...any) int64 {
-	for _, v := range vals {
-		if v == nil {
-			continue
-		}
-		switch t := v.(type) {
-		case float64:
-			if t > 0 {
-				return int64(t)
-			}
-		case string:
-			if t == "" {
-				continue
-			}
-			// Try parsing as unix timestamp string.
-			if n, err := strconv.ParseInt(t, 10, 64); err == nil && n > 0 {
-				return n
-			}
-			if n, err := strconv.ParseFloat(t, 64); err == nil && n > 0 {
-				return int64(n)
-			}
-			// Try parsing as ISO 8601 timestamp.
-			if ts, err := time.Parse(time.RFC3339Nano, t); err == nil {
-				return ts.Unix()
-			}
-			if ts, err := time.Parse(time.RFC3339, t); err == nil {
-				return ts.Unix()
-			}
-		}
-	}
-	return 0
-}
-
-// extractProfileARN extracts the ARN from a profile value that may be:
-// - a plain ARN string
-// - a JSON object like {"arn":"...","profile_name":"..."}
-func extractProfileARN(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	// Try as JSON object with "arn" field.
-	var obj struct {
-		ARN string `json:"arn"`
-	}
-	if err := json.Unmarshal([]byte(raw), &obj); err == nil && obj.ARN != "" {
-		return obj.ARN
-	}
-	return raw
 }

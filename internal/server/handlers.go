@@ -1,24 +1,18 @@
 package server
 
 import (
-	"encoding/json/v2"
-	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/d-kuro/kirocc/internal/httpx"
 	"github.com/d-kuro/kirocc/internal/models"
 )
 
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.MarshalWrite(w, map[string]string{"status": "ok"}); err != nil {
-		slog.ErrorContext(r.Context(), "write health response failed", "err", err)
-		return
-	}
-	_, _ = w.Write([]byte("\n"))
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleModels(w http.ResponseWriter, _ *http.Request) {
 	modelList := models.ListModels()
 	data := make([]any, 0, len(modelList))
 	now := time.Now().Unix()
@@ -30,13 +24,8 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			"owned_by": "kiro",
 		})
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.MarshalWrite(w, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"object": "list",
 		"data":   data,
-	}); err != nil {
-		slog.ErrorContext(r.Context(), "write models response failed", "err", err)
-		return
-	}
-	_, _ = w.Write([]byte("\n"))
+	})
 }

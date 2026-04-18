@@ -35,9 +35,9 @@ func (n *NonStreamingAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 	return n.acc.ProcessEvent(e)
 }
 
-// SetFilterToolName sets the tool name to filter from accumulator recording.
-func (n *NonStreamingAccumulator) SetFilterToolName(name string) {
-	n.acc.FilterToolName = name
+// SetDropToolName sets the tool name to filter from accumulator recording.
+func (n *NonStreamingAccumulator) SetDropToolName(name string) {
+	n.acc.DropToolName = name
 }
 
 // SetToolNameMap sets the short→original tool name map for response remapping.
@@ -71,8 +71,7 @@ func BuildNonStreamingResponse(events []kiroproto.Event, model string, contextWi
 
 // buildResponseFromAcc builds the Anthropic response from a responseAccumulator.
 func buildResponseFromAcc(acc *responseAccumulator, model string) (map[string]any, NonStreamingStats) {
-	// 1. Finalize thinking tags and stop sequence buffers.
-	acc.FinalizeStream()
+	_, _, res := finalizeResult(acc)
 
 	// Deduplicate tool calls.
 	toolCalls := DeduplicateToolCalls(acc.ToolCalls)
@@ -111,14 +110,9 @@ func buildResponseFromAcc(acc *responseAccumulator, model string) (map[string]an
 		})
 	}
 
-	stopReason, stopSequence := acc.resolveStopReason()
-
-	inputTokens, outputTokens := acc.resolvedUsage()
-	usage := acc.UsageMap(inputTokens, outputTokens)
-
 	stats := NonStreamingStats{
-		InputTokens:            inputTokens,
-		OutputTokens:           outputTokens,
+		InputTokens:            res.InputTokens,
+		OutputTokens:           res.OutputTokens,
 		HasContextUsage:        acc.HasContextUsage,
 		ContextUsagePercentage: acc.ContextUsagePercentage,
 	}
@@ -129,8 +123,8 @@ func buildResponseFromAcc(acc *responseAccumulator, model string) (map[string]an
 		"role":          "assistant",
 		"content":       content,
 		"model":         model,
-		"stop_reason":   stopReason,
-		"stop_sequence": stopSequence,
-		"usage":         usage,
+		"stop_reason":   res.StopReason,
+		"stop_sequence": res.StopSequence,
+		"usage":         res.Usage,
 	}, stats
 }

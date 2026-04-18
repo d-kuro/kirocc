@@ -13,27 +13,29 @@ const (
 	syntheticContinue = "Continue"
 )
 
-// Normalize runs the 5-step normalization pipeline on messages.
+// Normalize runs the normalization pipeline on messages. Ordering matters:
+// tool content handling runs first (it inspects original block shapes), then
+// role normalization, merging, and alternation fixups.
 func Normalize(msgs []anthropic.Message, hasTools bool) []anthropic.Message {
-	msgs = step1ToolContent(msgs, hasTools)
-	msgs = step4NormalizeRoles(msgs)
-	msgs = step2MergeAdjacentSameRole(msgs)
-	msgs = step3EnsureStartsWithUser(msgs)
-	msgs = step5EnsureAlternating(msgs)
+	msgs = textualizeToolContent(msgs, hasTools)
+	msgs = normalizeRoles(msgs)
+	msgs = mergeAdjacentSameRole(msgs)
+	msgs = ensureStartsWithUser(msgs)
+	msgs = ensureAlternatingRoles(msgs)
 	return msgs
 }
 
-// step1ToolContent handles tool content based on whether tools are defined.
-func step1ToolContent(msgs []anthropic.Message, hasTools bool) []anthropic.Message {
+// textualizeToolContent handles tool content based on whether tools are defined.
+func textualizeToolContent(msgs []anthropic.Message, hasTools bool) []anthropic.Message {
 	if !hasTools {
-		return step1aTextualizeAllToolContent(msgs)
+		return textualizeAllToolContent(msgs)
 	}
-	return step1bTextualizeOrphanToolResults(msgs)
+	return textualizeOrphanToolResults(msgs)
 }
 
-// step1aTextualizeAllToolContent converts all tool_use and tool_result blocks to text
+// textualizeAllToolContent converts all tool_use and tool_result blocks to text
 // when no tools are defined in the request.
-func step1aTextualizeAllToolContent(msgs []anthropic.Message) []anthropic.Message {
+func textualizeAllToolContent(msgs []anthropic.Message) []anthropic.Message {
 	result := make([]anthropic.Message, 0, len(msgs))
 	for _, msg := range msgs {
 		if msg.Content.IsString() {
@@ -63,9 +65,9 @@ func step1aTextualizeAllToolContent(msgs []anthropic.Message) []anthropic.Messag
 	return result
 }
 
-// step1bTextualizeOrphanToolResults converts tool_result blocks to text when
+// textualizeOrphanToolResults converts tool_result blocks to text when
 // the preceding assistant message doesn't have a matching tool_use.
-func step1bTextualizeOrphanToolResults(msgs []anthropic.Message) []anthropic.Message {
+func textualizeOrphanToolResults(msgs []anthropic.Message) []anthropic.Message {
 	result := make([]anthropic.Message, 0, len(msgs))
 	for i, msg := range msgs {
 		if msg.Role != "user" || msg.Content.IsString() {
@@ -124,21 +126,40 @@ func extractToolResultContentText(b anthropic.ContentBlock) string {
 	return strings.Join(parts, "\n")
 }
 
-// step2MergeAdjacentSameRole merges consecutive messages with the same role.
-// Text content is joined with "\n".
-func step2MergeAdjacentSameRole(msgs []anthropic.Message) []anthropic.Message {
+// mergeAdjacentSameRole merges runs of consecutive same-role plain-text messages
+// into a single message. Each run is joined with "\n" using one strings.Builder,
+// so the cost is O(total characters) rather than O(n²) from repeated concatenation.
+func mergeAdjacentSameRole(msgs []anthropic.Message) []anthropic.Message {
 	if len(msgs) == 0 {
 		return msgs
 	}
-	result := []anthropic.Message{msgs[0]}
-	for _, msg := range msgs[1:] {
-		last := &result[len(result)-1]
-		if msg.Role == last.Role && isPlainTextContent(last.Content) && isPlainTextContent(msg.Content) {
-			merged := ExtractTextContent(last.Content) + "\n" + ExtractTextContent(msg.Content)
-			last.Content = anthropic.MessageContent{Text: merged}
-		} else {
-			result = append(result, msg)
+	result := make([]anthropic.Message, 0, len(msgs))
+	i := 0
+	for i < len(msgs) {
+		// Find the end of a mergeable run starting at i.
+		j := i + 1
+		if isPlainTextContent(msgs[i].Content) {
+			for j < len(msgs) && msgs[j].Role == msgs[i].Role && isPlainTextContent(msgs[j].Content) {
+				j++
+			}
 		}
+		if j == i+1 {
+			result = append(result, msgs[i])
+			i = j
+			continue
+		}
+		var b strings.Builder
+		for k := i; k < j; k++ {
+			if k > i {
+				b.WriteByte('\n')
+			}
+			b.WriteString(ExtractTextContent(msgs[k].Content))
+		}
+		result = append(result, anthropic.Message{
+			Role:    msgs[i].Role,
+			Content: anthropic.MessageContent{Text: b.String()},
+		})
+		i = j
 	}
 	return result
 }
@@ -156,9 +177,9 @@ func isPlainTextContent(content anthropic.MessageContent) bool {
 	return true
 }
 
-// step3EnsureStartsWithUser prepends a synthetic "(empty)" user message
+// ensureStartsWithUser prepends a synthetic "(empty)" user message
 // if the first message is not from the user.
-func step3EnsureStartsWithUser(msgs []anthropic.Message) []anthropic.Message {
+func ensureStartsWithUser(msgs []anthropic.Message) []anthropic.Message {
 	if len(msgs) == 0 {
 		return msgs
 	}
@@ -172,9 +193,9 @@ func step3EnsureStartsWithUser(msgs []anthropic.Message) []anthropic.Message {
 	return append([]anthropic.Message{synthetic}, msgs...)
 }
 
-// step4NormalizeRoles converts non-standard roles (e.g., "developer") to "user".
+// normalizeRoles converts non-standard roles (e.g., "developer") to "user".
 // Returns a new slice if any mutation is needed; otherwise returns the original.
-func step4NormalizeRoles(msgs []anthropic.Message) []anthropic.Message {
+func normalizeRoles(msgs []anthropic.Message) []anthropic.Message {
 	var result []anthropic.Message
 	for i, msg := range msgs {
 		if msg.Role != "user" && msg.Role != "assistant" {
@@ -191,9 +212,9 @@ func step4NormalizeRoles(msgs []anthropic.Message) []anthropic.Message {
 	return msgs
 }
 
-// step5EnsureAlternating inserts synthetic "(empty)" messages between
+// ensureAlternatingRoles inserts synthetic "(empty)" messages between
 // consecutive messages with the same role.
-func step5EnsureAlternating(msgs []anthropic.Message) []anthropic.Message {
+func ensureAlternatingRoles(msgs []anthropic.Message) []anthropic.Message {
 	if len(msgs) <= 1 {
 		return msgs
 	}

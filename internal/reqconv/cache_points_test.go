@@ -7,30 +7,6 @@ import (
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 )
 
-func TestApplySystemCachePoints_NoOp(t *testing.T) {
-	// v2 captures show system cache_control is NOT converted to cachePoint.
-	system := anthropic.SystemPrompt{
-		Blocks: []anthropic.SystemBlock{
-			{Type: "text", Text: "System", CacheControl: &anthropic.CacheControl{Type: "ephemeral"}},
-		},
-	}
-	msg := &kiroproto.UserInputMessage{Content: "Hello"}
-	ApplySystemCachePoints(system, nil, msg)
-	if msg.CachePoint != nil {
-		t.Fatal("system cache_control should not produce cachePoint")
-	}
-}
-
-func TestApplySystemCachePoints_EmptyHistory(t *testing.T) {
-	system := anthropic.SystemPrompt{
-		Blocks: []anthropic.SystemBlock{
-			{Type: "text", Text: "System", CacheControl: &anthropic.CacheControl{Type: "ephemeral"}},
-		},
-	}
-	// Should not panic with empty history and nil currentMessage.
-	ApplySystemCachePoints(system, nil, nil)
-}
-
 func TestApplyToolCachePoints_WithCacheControl(t *testing.T) {
 	tools := []anthropic.Tool{
 		{Name: "a", CacheControl: &anthropic.CacheControl{Type: "ephemeral"}},

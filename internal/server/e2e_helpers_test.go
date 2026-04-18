@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	messagesapp "github.com/d-kuro/kirocc/internal/app/messages"
 	"github.com/d-kuro/kirocc/internal/auth"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
@@ -47,7 +46,7 @@ func newE2EServer(t *testing.T, client *capturingClient) *httptest.Server {
 			Region:      "us-east-1",
 		},
 	}
-	s := New(mgr, "", client)
+	s := New(mgr, "", client, WithCapture(true))
 	return newTCP4TestServer(t, s.Handler())
 }
 
@@ -116,17 +115,18 @@ func newE2EServerWithClient(t *testing.T, client kiroclient.Client) *httptest.Se
 			Region:      "us-east-1",
 		},
 	}
-	s := New(mgr, "", client)
+	s := New(mgr, "", client, WithCapture(true))
 	return newTCP4TestServer(t, s.Handler())
 }
 
-// setupCaptureTest configures slog and capture for testing, returning the log buffer.
+// setupCaptureTest redirects slog to a buffer at debug level, so tests can
+// assert capture log output. Capture itself is enabled on the server via
+// WithCapture in newE2EServer / newE2EServerWithClient.
 func setupCaptureTest(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
 	old := slog.Default()
 	slog.SetDefault(slog.New(logging.NewOTelHandler(&buf, slog.LevelDebug)))
 	t.Cleanup(func() { slog.SetDefault(old) })
-	t.Cleanup(messagesapp.ConfigureCaptureForTesting(func(context.Context) bool { return true }))
 	return &buf
 }

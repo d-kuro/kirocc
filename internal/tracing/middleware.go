@@ -8,10 +8,7 @@ import (
 	"unicode/utf8"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-
-	"github.com/d-kuro/kirocc/internal/logging"
 )
 
 // Middleware returns an HTTP middleware that creates OTel server spans and
@@ -35,12 +32,7 @@ func Middleware(next http.Handler, bodyLimit int) http.Handler {
 			r.Body = cap
 			defer func() {
 				body, truncated, totalSize := cap.captured()
-				attrs := []attribute.KeyValue{
-					attribute.String("http.request.body", toValidUTF8(body)),
-					attribute.Bool("http.request.body.truncated", truncated),
-					attribute.Int("http.request.body.size", totalSize),
-				}
-				span.AddEvent("http.request.body", trace.WithAttributes(attrs...))
+				recordBodyEvent(span, "http.request", body, truncated, totalSize)
 			}()
 		}
 
@@ -49,23 +41,6 @@ func Middleware(next http.Handler, bodyLimit int) http.Handler {
 		// Record response headers as span event.
 		span.AddEvent("http.response", trace.WithAttributes(sanitizedHeaderAttrs("http.response.header.", w.Header())...))
 	}))
-}
-
-// sanitizedHeaderAttrs converts HTTP headers to OTel attributes, redacting sensitive values.
-func sanitizedHeaderAttrs(prefix string, h http.Header) []attribute.KeyValue {
-	attrs := make([]attribute.KeyValue, 0, len(h))
-	for k, vs := range h {
-		var val string
-		if logging.IsSensitiveHeader(k) {
-			val = "[REDACTED]"
-		} else if len(vs) == 1 {
-			val = vs[0]
-		} else {
-			val = strings.Join(vs, ", ")
-		}
-		attrs = append(attrs, attribute.String(prefix+k, val))
-	}
-	return attrs
 }
 
 // bodyCaptureReader wraps an io.ReadCloser and captures the first N bytes read.

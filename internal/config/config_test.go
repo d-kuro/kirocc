@@ -147,3 +147,26 @@ func TestApplyEnvOverrides_LogFields(t *testing.T) {
 		t.Error("LogFile.Console = false, want true")
 	}
 }
+
+func TestConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     Config
+		wantErr bool
+	}{
+		{"valid defaults", Config{Host: "127.0.0.1", Port: 3456}, false},
+		{"empty host", Config{Port: 3456}, true},
+		{"port zero", Config{Host: "127.0.0.1", Port: 0}, true},
+		{"port negative", Config{Host: "127.0.0.1", Port: -1}, true},
+		{"port too large", Config{Host: "127.0.0.1", Port: 70000}, true},
+		{"negative otel body limit", Config{Host: "127.0.0.1", Port: 3456, OTelBodyLimit: -1}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() err = %v, wantErr = %v", err, tt.wantErr)
+			}
+		})
+	}
+}

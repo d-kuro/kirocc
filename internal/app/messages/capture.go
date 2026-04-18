@@ -14,21 +14,6 @@ import (
 	"github.com/d-kuro/kirocc/internal/logging"
 )
 
-var upstreamCaptureEnabled = func(ctx context.Context) bool {
-	return slog.Default().Enabled(ctx, slog.LevelDebug)
-}
-
-// ConfigureCaptureForTesting overrides capture settings and returns a restore function.
-func ConfigureCaptureForTesting(enabled func(context.Context) bool) func() {
-	oldEnabled := upstreamCaptureEnabled
-	if enabled != nil {
-		upstreamCaptureEnabled = enabled
-	}
-	return func() {
-		upstreamCaptureEnabled = oldEnabled
-	}
-}
-
 type upstreamCapturedEvent struct {
 	Seq                    int     `json:"seq"`
 	Type                   string  `json:"type"`
@@ -76,8 +61,8 @@ type upstreamAttemptCapture struct {
 	hasRealToolUse          bool
 }
 
-func newUpstreamAttemptCapture(ctx context.Context, payload *kiroproto.Payload, model string, thinking, stream bool, attempt int) *upstreamAttemptCapture {
-	if !upstreamCaptureEnabled(ctx) {
+func newUpstreamAttemptCapture(ctx context.Context, enabled bool, payload *kiroproto.Payload, model string, thinking, stream bool, attempt int) *upstreamAttemptCapture {
+	if !enabled {
 		return nil
 	}
 
