@@ -9,6 +9,7 @@ import (
 
 	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/auth"
+	"github.com/d-kuro/kirocc/internal/httpx"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 	"github.com/d-kuro/kirocc/internal/logging"
 	"github.com/d-kuro/kirocc/internal/models"
@@ -25,13 +26,13 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.WarnContext(r.Context(), "invalid request",
 			"trace_id", short, "err", err)
-		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
+		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 		return
 	}
 
 	ccSessionID := r.Header.Get(headerCCSessionID)
 	if ccSessionID == "" {
-		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, "missing "+headerCCSessionID+" header")
+		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, "missing "+headerCCSessionID+" header")
 		return
 	}
 	ctx := logging.WithSessionID(r.Context(), ccSessionID)
@@ -47,7 +48,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.ErrorContext(r.Context(), "auth error",
 			"trace_id", short, "err", err)
-		WriteErrorJSON(w, http.StatusUnauthorized, ErrTypeAuthentication, "authentication failed")
+		httpx.WriteError(w, http.StatusUnauthorized, ErrTypeAuthentication, "authentication failed")
 		return
 	}
 
@@ -150,7 +151,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 			}
 			if reason == retryReasonEmptyVisibleEndTurn {
 				slog.ErrorContext(r.Context(), "tool search retry also returned empty visible end_turn", "trace_id", short)
-				WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream returned empty response")
+				httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream returned empty response")
 			}
 		}
 		return
@@ -166,7 +167,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.WarnContext(r.Context(), "payload build error",
 			"trace_id", short, "err", err)
-		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
+		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 		return
 	}
 	reverseMap := nameMap.ReverseMap()
@@ -193,13 +194,13 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		if reason == retryReasonEmptyVisibleEndTurn {
 			slog.ErrorContext(r.Context(), "retry also returned empty visible end_turn",
 				"trace_id", short, "reason", reason)
-			WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream returned empty response")
+			httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream returned empty response")
 			return
 		}
 		// Retry returned a different error (e.g. invalid state) — report it as-is.
 		slog.ErrorContext(r.Context(), "retry failed with different reason",
 			"trace_id", short, "reason", reason)
-		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, "invalid state: "+reason)
+		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, "invalid state: "+reason)
 		return
 	}
 
@@ -210,7 +211,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	)
 	payload.ConversationState.ConversationID = ""
 	if reason := s.callAndHandle(r.Context(), w, req, payload, creds, kiroModel, anthropicModel, contextWindowSize, thinking, 2, reverseMap); reason != "" {
-		WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, "invalid state: "+reason)
+		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, "invalid state: "+reason)
 	}
 }
 
@@ -224,7 +225,7 @@ func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, req 
 	apiResp, err := s.client.GenerateAssistantResponse(ctx, creds.AccessToken, payload, creds.Region)
 	if err != nil {
 		logUpstreamError(ctx, short, err)
-		WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream API error")
+		httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream API error")
 		return ""
 	}
 	body := apiResp.Body

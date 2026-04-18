@@ -10,6 +10,7 @@ import (
 
 	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/auth"
+	"github.com/d-kuro/kirocc/internal/httpx"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 	"github.com/d-kuro/kirocc/internal/logging"
 	"github.com/d-kuro/kirocc/internal/reqconv"
@@ -119,7 +120,7 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 			}
 			if streamErr && !gw.IsPromoted() {
 				gw.Discard()
-				WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream stream error")
+				httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream stream error")
 			}
 			if !streamErr {
 				inputTokens, outputTokens := sw.Usage()
@@ -169,14 +170,14 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 	for round := range maxToolSearchRounds {
 		payload, nameMap, err := o.buildPayload(msgs)
 		if err != nil {
-			WriteErrorJSON(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
+			httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 			return ""
 		}
 
 		apiResp, err := o.service.client.GenerateAssistantResponse(ctx, o.creds.AccessToken, payload, o.creds.Region)
 		if err != nil {
 			logUpstreamError(ctx, short, err, "round", round+1)
-			WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream API error")
+			httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream API error")
 			return ""
 		}
 
@@ -203,7 +204,7 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 		_ = apiResp.Body.Close()
 
 		if (err != nil || hasError) && !foundToolSearch {
-			WriteErrorJSON(w, http.StatusBadGateway, errTypeAPI, "upstream error")
+			httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream error")
 			return ""
 		}
 
@@ -367,7 +368,7 @@ func writeStreamingOrJSONError(gw *GateWriter, sw *respconv.SSEWriter, w http.Re
 	if !gw.IsPromoted() {
 		gw.Discard()
 	}
-	WriteErrorJSON(w, status, errType, message)
+	httpx.WriteError(w, status, errType, message)
 }
 
 // parseToolSearchInput extracts query and max_results from the ToolSearch tool input JSON.
