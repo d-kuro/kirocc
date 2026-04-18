@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/auth"
@@ -52,7 +51,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	kiroModel, thinking, contextWindowSize, anthropicModel := models.Resolve(req.Model, hasContext1MBeta(r.Header))
+	kiroModel, thinking, contextWindowSize, anthropicModel := models.Resolve(req.Model, anthropic.HasContext1MBeta(r.Header))
 
 	// Also check the request's thinking field (Anthropic API standard).
 	if req.IsThinkingEnabled() {
@@ -244,16 +243,4 @@ func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, req 
 		capture.logCapture(ctx, reason)
 	}
 	return reason
-}
-
-// hasContext1MBeta checks if the Anthropic-Beta header contains a context-1m flag.
-func hasContext1MBeta(h http.Header) bool {
-	for _, v := range h["Anthropic-Beta"] {
-		for beta := range strings.SplitSeq(v, ",") {
-			if strings.HasPrefix(strings.TrimSpace(beta), "context-1m") {
-				return true
-			}
-		}
-	}
-	return false
 }

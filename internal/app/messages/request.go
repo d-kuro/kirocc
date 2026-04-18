@@ -28,9 +28,11 @@ func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 	profileARN := ""
 	if creds, err := s.auth.GetToken(r.Context()); err == nil {
 		profileARN = creds.ProfileARN
+	} else {
+		slog.DebugContext(r.Context(), "count_tokens proceeding without credentials", "err", err)
 	}
 
-	kiroModel, thinking, _, _ := models.Resolve(req.Model, hasContext1MBeta(r.Header))
+	kiroModel, thinking, _, _ := models.Resolve(req.Model, anthropic.HasContext1MBeta(r.Header))
 	if req.IsThinkingEnabled() {
 		thinking = true
 	}

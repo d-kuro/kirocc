@@ -3,6 +3,7 @@ package reqconv
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"maps"
 )
 
 const maxToolNameLen = 64
@@ -59,8 +60,6 @@ func (m *ToolNameMap) ReverseMap() map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(m.toOriginal))
-	for k, v := range m.toOriginal {
-		out[k] = v
-	}
+	maps.Copy(out, m.toOriginal)
 	return out
 }
