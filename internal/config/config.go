@@ -80,6 +80,22 @@ func ApplyEnvOverrides(cfg *Config) error {
 	return nil
 }
 
+// Validate checks that the config is internally consistent. Returns an error
+// describing the first violation found. Called after flag parsing and env
+// overrides, before the server starts.
+func (c *Config) Validate() error {
+	if c.Host == "" {
+		return fmt.Errorf("host must not be empty")
+	}
+	if c.Port <= 0 || c.Port > 65535 {
+		return fmt.Errorf("port must be in 1..65535, got %d", c.Port)
+	}
+	if c.OTelBodyLimit < 0 {
+		return fmt.Errorf("otel-body-limit must be >= 0, got %d", c.OTelBodyLimit)
+	}
+	return nil
+}
+
 func applyString(key string, dst *string) {
 	if v := os.Getenv(key); v != "" {
 		*dst = v
