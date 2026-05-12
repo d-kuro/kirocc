@@ -51,6 +51,9 @@ type responseAccumulator struct {
 	HasContextUsage        bool
 	ContextUsagePercentage float64
 	ContextWindowSize      int // set externally by SSEWriter / BuildNonStreamingResponse
+	// Credit usage from meteringEvent.
+	HasCredits bool
+	Credits    float64
 	// Signature from reasoningContentEvent.
 	Signature string
 	// Conversation metadata.

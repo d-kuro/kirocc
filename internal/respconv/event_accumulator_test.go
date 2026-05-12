@@ -113,6 +113,31 @@ func TestAccumulator_MeteringFallback(t *testing.T) {
 	}
 }
 
+func TestAccumulator_MeteringCredits(t *testing.T) {
+	var acc responseAccumulator
+
+	if acc.HasCredits {
+		t.Fatal("expected HasCredits=false before any event")
+	}
+
+	acc.ProcessEvent(kiroproto.Event{Type: "meteringEvent", Credits: 0.42})
+	if !acc.HasCredits {
+		t.Fatal("expected HasCredits=true after meteringEvent")
+	}
+	if acc.Credits != 0.42 {
+		t.Fatalf("Credits = %v, want 0.42", acc.Credits)
+	}
+
+	// Last-wins: a subsequent meteringEvent overwrites the value but keeps HasCredits.
+	acc.ProcessEvent(kiroproto.Event{Type: "meteringEvent", Credits: 0})
+	if !acc.HasCredits {
+		t.Fatal("HasCredits should remain true")
+	}
+	if acc.Credits != 0 {
+		t.Fatalf("Credits = %v, want 0 (last-wins)", acc.Credits)
+	}
+}
+
 func TestAccumulator_ConversationID(t *testing.T) {
 	var acc responseAccumulator
 	acc.ProcessEvent(kiroproto.Event{Type: "messageMetadataEvent", ConversationID: "conv-abc"})

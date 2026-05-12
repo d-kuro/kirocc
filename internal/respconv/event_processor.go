@@ -72,6 +72,8 @@ func (a *responseAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 		a.CacheWriteInputTokens = e.CacheWriteInputTokens
 
 	case kiroproto.EventMetering:
+		a.HasCredits = true
+		a.Credits = e.Credits
 		if !a.HasMetadata {
 			a.InputTokens = e.InputTokens
 			a.OutputTokens = e.OutputTokens
