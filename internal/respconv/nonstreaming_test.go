@@ -94,12 +94,29 @@ func TestBuildNonStreamingResponse_CacheTokens(t *testing.T) {
 func TestBuildNonStreamingResponse_MeteringFallback(t *testing.T) {
 	events := []kiroproto.Event{
 		{Type: "assistantResponseEvent", Content: "Hi"},
-		{Type: "meteringEvent", InputTokens: 30, OutputTokens: 10},
+		{Type: "meteringEvent", InputTokens: 30, OutputTokens: 10, Credits: 0.1234},
 	}
-	resp, _ := BuildNonStreamingResponse(events, "claude-sonnet-4.6", 200000, nil, 0, 0)
+	resp, stats := BuildNonStreamingResponse(events, "claude-sonnet-4.6", 200000, nil, 0, 0)
 	usage := resp["usage"].(map[string]any)
 	if usage["input_tokens"] != 30 {
 		t.Fatalf("input_tokens = %v", usage["input_tokens"])
+	}
+	if !stats.HasCredits {
+		t.Fatal("expected stats.HasCredits=true")
+	}
+	if stats.Credits != 0.1234 {
+		t.Fatalf("stats.Credits = %v, want 0.1234", stats.Credits)
+	}
+}
+
+func TestBuildNonStreamingResponse_NoMetering_NoCredits(t *testing.T) {
+	events := []kiroproto.Event{
+		{Type: "assistantResponseEvent", Content: "Hi"},
+		{Type: "metadataEvent", InputTokens: 10, OutputTokens: 5},
+	}
+	_, stats := BuildNonStreamingResponse(events, "claude-sonnet-4.6", 200000, nil, 0, 0)
+	if stats.HasCredits {
+		t.Fatal("expected stats.HasCredits=false when no meteringEvent")
 	}
 }
 

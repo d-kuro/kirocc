@@ -142,6 +142,50 @@ func TestSSEWriter_MetadataEvent(t *testing.T) {
 	}
 }
 
+func TestSSEWriter_Credits(t *testing.T) {
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "claude-sonnet-4.6", 200000, nil, 0, 0)
+
+	if _, ok := sw.Credits(); ok {
+		t.Fatal("expected no credits before any meteringEvent")
+	}
+
+	sw.HandleEvent(kiroproto.Event{Type: "meteringEvent", Credits: 0.5417})
+	sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "Hi"})
+	sw.Finish()
+
+	credits, ok := sw.Credits()
+	if !ok {
+		t.Fatal("expected credits to be present after meteringEvent")
+	}
+	if credits != 0.5417 {
+		t.Fatalf("Credits() = %v, want 0.5417", credits)
+	}
+}
+
+func TestSSEWriter_RecordTail(t *testing.T) {
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "claude-sonnet-4.6", 200000, nil, 0, 0)
+	bodyBefore := w.Body.Len()
+
+	// RecordTail should ingest credit/context info but not write SSE output.
+	sw.RecordTail(kiroproto.Event{Type: "meteringEvent", Credits: 0.99})
+	sw.RecordTail(kiroproto.Event{Type: "contextUsageEvent", ContextUsagePercentage: 12.5})
+	// A non-tail event must be ignored entirely (not routed to acc, no SSE).
+	sw.RecordTail(kiroproto.Event{Type: "assistantResponseEvent", Content: "should-not-appear"})
+
+	if w.Body.Len() != bodyBefore {
+		t.Fatalf("RecordTail wrote SSE bytes (%d → %d)", bodyBefore, w.Body.Len())
+	}
+	credits, ok := sw.Credits()
+	if !ok || credits != 0.99 {
+		t.Fatalf("Credits = (%v, %v), want (0.99, true)", credits, ok)
+	}
+	if !sw.HasContextUsage() || sw.ContextUsagePercentage() != 12.5 {
+		t.Fatalf("ContextUsage = (%v, %v), want (12.5, true)", sw.ContextUsagePercentage(), sw.HasContextUsage())
+	}
+}
+
 func TestSSEWriter_RedactedContent(t *testing.T) {
 	w := httptest.NewRecorder()
 	sw := NewSSEWriter(context.Background(), w, "claude-sonnet-4.6", 200000, nil, 0, 0)

@@ -2,6 +2,7 @@ package respconv
 
 import (
 	"encoding/json/jsontext"
+	"math"
 	"unicode/utf8"
 
 	"github.com/d-kuro/kirocc/internal/kiroproto"
@@ -72,6 +73,13 @@ func (a *responseAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 		a.CacheWriteInputTokens = e.CacheWriteInputTokens
 
 	case kiroproto.EventMetering:
+		// Reject NaN/Inf/negative so a malformed upstream payload never
+		// poisons the cumulative log/span values; downstream callers see
+		// HasCredits=false, the same as "no meteringEvent received".
+		if !math.IsNaN(e.Credits) && !math.IsInf(e.Credits, 0) && e.Credits >= 0 {
+			a.HasCredits = true
+			a.Credits = e.Credits
+		}
 		if !a.HasMetadata {
 			a.InputTokens = e.InputTokens
 			a.OutputTokens = e.OutputTokens

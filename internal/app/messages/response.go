@@ -5,7 +5,11 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/d-kuro/kirocc/internal/httpx"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
@@ -13,6 +17,14 @@ import (
 	"github.com/d-kuro/kirocc/internal/logging"
 	"github.com/d-kuro/kirocc/internal/respconv"
 )
+
+// roundCredits rounds credit consumption to 3 decimals for human-readable
+// log output and OTel attributes. Kiro reports raw values like 0.19354654693200665
+// which are noisy at full precision; 0.001 (1 milli-credit) is the smallest
+// unit that matters for display.
+func roundCredits(c float64) float64 {
+	return math.Round(c*1000) / 1000
+}
 
 const retryReasonEmptyVisibleEndTurn = "empty_visible_end_turn"
 
@@ -63,6 +75,8 @@ func (s *Service) handleStreamingResponse(ctx context.Context, w http.ResponseWr
 			return false
 		}
 		// Distinguish adapter-side stop (Finish already called) from error.
+		// Closing the upstream body immediately on localStop avoids paying
+		// for tokens/credits the client will never receive.
 		if sw.LocalStop() {
 			localStop = true
 			return true
@@ -104,6 +118,9 @@ func (s *Service) handleStreamingResponse(ctx context.Context, w http.ResponseWr
 		}
 		args = append(args, capture.logAttrs()...)
 		slog.WarnContext(ctx, "empty visible end_turn detected", args...)
+		if credits, ok := sw.Credits(); ok {
+			logAbortedAttemptCredits(ctx, short, credits, retryReasonEmptyVisibleEndTurn)
+		}
 		return retryReasonEmptyVisibleEndTurn
 	}
 
@@ -115,7 +132,8 @@ func (s *Service) handleStreamingResponse(ctx context.Context, w http.ResponseWr
 			"headers", logging.SafeHeaders{H: gw.Header()},
 		)
 		inputTokens, outputTokens := sw.Usage()
-		logResponseStats(ctx, short, inputTokens, outputTokens, sw.HasContextUsage(), sw.ContextUsagePercentage(), contextWindowSize)
+		credits, hasCredits := sw.Credits()
+		logResponseStats(ctx, short, inputTokens, outputTokens, sw.HasContextUsage(), sw.ContextUsagePercentage(), contextWindowSize, credits, hasCredits)
 	}
 	return ""
 }
@@ -175,6 +193,9 @@ func (s *Service) handleNonStreamingResponse(ctx context.Context, w http.Respons
 		}
 		args = append(args, capture.logAttrs()...)
 		slog.WarnContext(ctx, "empty visible end_turn detected", args...)
+		if credits, ok := acc.Credits(); ok {
+			logAbortedAttemptCredits(ctx, short, credits, retryReasonEmptyVisibleEndTurn)
+		}
 		return retryReasonEmptyVisibleEndTurn
 	}
 
@@ -190,32 +211,52 @@ func (s *Service) handleNonStreamingResponse(ctx context.Context, w http.Respons
 	}
 	_, _ = w.Write([]byte("\n"))
 
-	logResponseStats(ctx, short, stats.InputTokens, stats.OutputTokens, stats.HasContextUsage, stats.ContextUsagePercentage, contextWindowSize)
+	logResponseStats(ctx, short, stats.InputTokens, stats.OutputTokens, stats.HasContextUsage, stats.ContextUsagePercentage, contextWindowSize, stats.Credits, stats.HasCredits)
 	return ""
 }
 
 // logResponseStats logs response completion and warns on context limit exceeded.
-func logResponseStats(ctx context.Context, short string, inputTokens, outputTokens int, hasContextUsage bool, contextUsagePct float64, contextWindowSize int) {
+func logResponseStats(ctx context.Context, short string, inputTokens, outputTokens int, hasContextUsage bool, contextUsagePct float64, contextWindowSize int, credits float64, hasCredits bool) {
 	hasUsage := inputTokens > 0 || outputTokens > 0 || hasContextUsage
 	pct := resolveContextPercent(contextUsagePct, hasContextUsage, inputTokens, contextWindowSize)
 	contextUsage := "unknown"
 	if hasUsage {
 		contextUsage = fmt.Sprintf("%.1fk(%.1f%%)", float64(inputTokens)/1000, pct)
 	}
-	slog.InfoContext(ctx, "<-- POST /v1/messages",
+	args := []any{
 		"trace_id", short,
 		"session_id", logging.ShortID(logging.SessionIDFromContext(ctx)),
 		"status", 200,
 		"input_tokens", inputTokens,
 		"output_tokens", outputTokens,
 		"context_usage", contextUsage,
-	)
+	}
+	if hasCredits {
+		rounded := roundCredits(credits)
+		trace.SpanFromContext(ctx).SetAttributes(attribute.Float64("kiro.credits", rounded))
+		args = append(args, "credits", rounded)
+	}
+	slog.InfoContext(ctx, "<-- POST /v1/messages", args...)
 	if hasUsage && pct >= 100 {
 		slog.WarnContext(ctx, "context limit exceeded",
 			"trace_id", short,
 			"context_usage", fmt.Sprintf("%.1fk(%.1f%%)", float64(inputTokens)/1000, pct),
 		)
 	}
+}
+
+// logAbortedAttemptCredits logs the credits consumed by an upstream attempt
+// that the proxy decided to abandon (e.g. empty-visible end_turn that triggers
+// retry). The successful retry's credits flow through logResponseStats normally,
+// so this avoids under-reporting cumulative credit consumption.
+func logAbortedAttemptCredits(ctx context.Context, short string, credits float64, reason string) {
+	rounded := roundCredits(credits)
+	trace.SpanFromContext(ctx).SetAttributes(attribute.Float64("kiro.credits.aborted_attempt", rounded))
+	slog.InfoContext(ctx, "upstream attempt credits (aborted)",
+		"trace_id", short,
+		"credits", rounded,
+		"reason", reason,
+	)
 }
 
 // resolveContextPercent returns the context usage percentage, falling back to

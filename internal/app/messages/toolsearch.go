@@ -22,6 +22,40 @@ import (
 
 const maxToolSearchRounds = 3
 
+// roundTotals accumulates per-round usage across tool-search rounds and folds
+// in the current (partial) round when a final summary is needed.
+type roundTotals struct {
+	inputTokens  int
+	outputTokens int
+	credits      float64
+	hasCredits   bool
+}
+
+// addCompleted accumulates a round whose accumulator is about to be reset.
+func (t *roundTotals) addCompleted(in, out int, credits float64, hasCredits bool) {
+	t.inputTokens += in
+	t.outputTokens += out
+	if hasCredits {
+		t.credits += credits
+		t.hasCredits = true
+	}
+}
+
+// withCurrent returns the totals folded together with the current round's stats.
+func (t roundTotals) withCurrent(in, out int, credits float64, hasCredits bool) (totalIn, totalOut int, totalCredits float64, totalHasCredits bool) {
+	totalIn = t.inputTokens + in
+	totalOut = t.outputTokens + out
+	totalCredits = t.credits + credits
+	totalHasCredits = t.hasCredits || hasCredits
+	return
+}
+
+// creditsWith returns cumulative credits including the current round; the bool
+// is true if any meteringEvent was observed across all rounds so far.
+func (t roundTotals) creditsWith(credits float64, hasCredits bool) (float64, bool) {
+	return t.credits + credits, t.hasCredits || hasCredits
+}
+
 // toolSearchOrchestrator manages the inner loop for tool search.
 type toolSearchOrchestrator struct {
 	service           *Service
@@ -52,7 +86,7 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 
 	msgs := slices.Clone(o.req.Messages)
 
-	var cumulativeInputTokens, cumulativeOutputTokens int
+	var totals roundTotals
 
 	for round := range maxToolSearchRounds {
 		payload, nameMap, err := o.buildPayload(msgs)
@@ -73,8 +107,8 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 		if round > 0 {
 			// Accumulate usage from previous round before resetting.
 			in, out := sw.Usage()
-			cumulativeInputTokens += in
-			cumulativeOutputTokens += out
+			credits, hasCredits := sw.Credits()
+			totals.addCompleted(in, out, credits, hasCredits)
 			sw.ResetAccumulator(o.contextWindowSize, o.req.StopSequences, o.req.MaxTokens, 0)
 		}
 		sw.SetDropToolName(toolsearch.KiroToolSearchName)
@@ -84,8 +118,19 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 		var streamErr, localStop bool
 
 		err = kiroproto.ParseStream(ctx, apiResp.Body, func(e kiroproto.Event) bool {
-			if streamErr || localStop || foundToolSearch {
+			if streamErr || localStop {
 				return true
+			}
+			// After the tool-search frame is observed, keep parsing so subsequent
+			// meteringEvent / contextUsageEvent frames flow into the accumulator.
+			// Upstream errors in the tail must still abort the round.
+			if foundToolSearch {
+				if e.Type == kiroproto.EventException || e.Type == kiroproto.EventInvalidState {
+					streamErr = true
+					return true
+				}
+				sw.RecordTail(e)
+				return false
 			}
 			if sw.WriteErr() {
 				streamErr = true
@@ -94,7 +139,7 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 			if e.Type == kiroproto.EventToolUse && e.ToolStop && e.ToolName == toolsearch.KiroToolSearchName {
 				foundToolSearch = true
 				toolSearchInput = e.ToolInput
-				return true
+				return false
 			}
 			shouldStop := sw.HandleEvent(e)
 			if sw.WriteErr() {
@@ -113,30 +158,40 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 		})
 		_ = apiResp.Body.Close()
 
-		if err != nil && !foundToolSearch {
-			slog.ErrorContext(ctx, "stream error", "trace_id", short, "round", round+1, "err", err)
+		// A parse error or upstream error frame in the tail must abort the
+		// orchestrator even when the tool-search frame was already observed.
+		if err != nil || streamErr {
+			if err != nil {
+				slog.ErrorContext(ctx, "stream error", "trace_id", short, "round", round+1, "err", err)
+			}
+			// If the stream is already promoted, sw.HandleEvent has already
+			// emitted an SSE error event for invalidStateEvent/exception;
+			// emitting another would produce duplicate/conflicting frames.
+			if sw.Started() && gw.IsPromoted() {
+				return ""
+			}
 			writeStreamingOrJSONError(gw, sw, w, http.StatusBadGateway, errTypeAPI, "upstream stream error")
 			return ""
 		}
 
 		if !foundToolSearch {
-			if !streamErr && !localStop {
+			// streamErr was already handled above; only success/localStop reach here.
+			if !localStop {
 				sw.Finish()
 			}
 			// Detect empty visible end_turn (thinking-only response) and signal retry.
-			if !streamErr && !localStop && sw.IsEmptyVisibleEndTurn() && !gw.IsPromoted() {
+			if !localStop && sw.IsEmptyVisibleEndTurn() && !gw.IsPromoted() {
 				gw.Discard()
 				slog.WarnContext(ctx, "empty visible end_turn detected in tool search", "trace_id", short)
+				if credits, ok := totals.creditsWith(sw.Credits()); ok {
+					logAbortedAttemptCredits(ctx, short, credits, retryReasonEmptyVisibleEndTurn)
+				}
 				return retryReasonEmptyVisibleEndTurn
 			}
-			if streamErr && !gw.IsPromoted() {
-				gw.Discard()
-				httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream stream error")
-			}
-			if !streamErr {
-				inputTokens, outputTokens := sw.Usage()
-				logResponseStats(ctx, short, inputTokens+cumulativeInputTokens, outputTokens+cumulativeOutputTokens, sw.HasContextUsage(), sw.ContextUsagePercentage(), o.contextWindowSize)
-			}
+			in, out := sw.Usage()
+			credits, hasCredits := sw.Credits()
+			totalIn, totalOut, totalCredits, totalHasCredits := totals.withCurrent(in, out, credits, hasCredits)
+			logResponseStats(ctx, short, totalIn, totalOut, sw.HasContextUsage(), sw.ContextUsagePercentage(), o.contextWindowSize, totalCredits, totalHasCredits)
 			return ""
 		}
 
@@ -166,8 +221,10 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 	// Max rounds reached without normal completion.
 	slog.WarnContext(ctx, "tool search max rounds reached", "trace_id", short, "max_rounds", maxToolSearchRounds)
 	sw.Finish()
-	inputTokens, outputTokens := sw.Usage()
-	logResponseStats(ctx, short, inputTokens+cumulativeInputTokens, outputTokens+cumulativeOutputTokens, sw.HasContextUsage(), sw.ContextUsagePercentage(), o.contextWindowSize)
+	in, out := sw.Usage()
+	credits, hasCredits := sw.Credits()
+	totalIn, totalOut, totalCredits, totalHasCredits := totals.withCurrent(in, out, credits, hasCredits)
+	logResponseStats(ctx, short, totalIn, totalOut, sw.HasContextUsage(), sw.ContextUsagePercentage(), o.contextWindowSize, totalCredits, totalHasCredits)
 	return ""
 }
 
@@ -177,7 +234,7 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 	msgs := slices.Clone(o.req.Messages)
 
 	var orderedBlocks []any
-	var totalInputTokens, totalOutputTokens int
+	var totals roundTotals
 	var lastStopReason string
 	var lastStopSequence any
 
@@ -225,8 +282,7 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 		}
 
 		resp, stats := acc.BuildResponse(o.responseModel)
-		totalInputTokens += stats.InputTokens
-		totalOutputTokens += stats.OutputTokens
+		totals.addCompleted(stats.InputTokens, stats.OutputTokens, stats.Credits, stats.HasCredits)
 		lastStopReason, _ = resp["stop_reason"].(string)
 		lastStopSequence = resp["stop_sequence"]
 
@@ -238,6 +294,9 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 			// Detect empty visible end_turn (thinking-only response) and signal retry.
 			if acc.IsEmptyVisibleEndTurn() {
 				slog.WarnContext(ctx, "empty visible end_turn detected in tool search", "trace_id", short)
+				if totals.hasCredits {
+					logAbortedAttemptCredits(ctx, short, totals.credits, retryReasonEmptyVisibleEndTurn)
+				}
 				return retryReasonEmptyVisibleEndTurn
 			}
 			normalExit = true
@@ -303,8 +362,8 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 		"stop_reason":   lastStopReason,
 		"stop_sequence": lastStopSequence,
 		"usage": map[string]any{
-			"input_tokens":                totalInputTokens,
-			"output_tokens":               totalOutputTokens,
+			"input_tokens":                totals.inputTokens,
+			"output_tokens":               totals.outputTokens,
 			"cache_read_input_tokens":     0,
 			"cache_creation_input_tokens": 0,
 		},
@@ -316,7 +375,7 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 	}
 	_, _ = w.Write([]byte("\n"))
 
-	logResponseStats(ctx, short, totalInputTokens, totalOutputTokens, false, 0, o.contextWindowSize)
+	logResponseStats(ctx, short, totals.inputTokens, totals.outputTokens, false, 0, o.contextWindowSize, totals.credits, totals.hasCredits)
 	return ""
 }
 

@@ -1,6 +1,7 @@
 package respconv
 
 import (
+	"math"
 	"testing"
 
 	"github.com/d-kuro/kirocc/internal/kiroproto"
@@ -110,6 +111,67 @@ func TestAccumulator_MeteringFallback(t *testing.T) {
 	acc.ProcessEvent(kiroproto.Event{Type: "meteringEvent", InputTokens: 999, OutputTokens: 999})
 	if acc.InputTokens != 100 {
 		t.Fatalf("InputTokens = %d, metering should be ignored", acc.InputTokens)
+	}
+}
+
+func TestAccumulator_MeteringCredits(t *testing.T) {
+	var acc responseAccumulator
+
+	if acc.HasCredits {
+		t.Fatal("expected HasCredits=false before any event")
+	}
+
+	acc.ProcessEvent(kiroproto.Event{Type: "meteringEvent", Credits: 0.42})
+	if !acc.HasCredits {
+		t.Fatal("expected HasCredits=true after meteringEvent")
+	}
+	if acc.Credits != 0.42 {
+		t.Fatalf("Credits = %v, want 0.42", acc.Credits)
+	}
+
+	// Last-wins: a subsequent meteringEvent overwrites the value but keeps HasCredits.
+	acc.ProcessEvent(kiroproto.Event{Type: "meteringEvent", Credits: 0})
+	if !acc.HasCredits {
+		t.Fatal("HasCredits should remain true")
+	}
+	if acc.Credits != 0 {
+		t.Fatalf("Credits = %v, want 0 (last-wins)", acc.Credits)
+	}
+}
+
+func TestAccumulator_MeteringInvalidCreditsIgnored(t *testing.T) {
+	cases := []struct {
+		name    string
+		credits float64
+	}{
+		{"NaN", math.NaN()},
+		{"+Inf", math.Inf(1)},
+		{"-Inf", math.Inf(-1)},
+		{"negative", -1.5},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var acc responseAccumulator
+			acc.ProcessEvent(kiroproto.Event{Type: "meteringEvent", Credits: tc.credits})
+			if acc.HasCredits {
+				t.Fatalf("HasCredits should remain false for invalid credits=%v", tc.credits)
+			}
+			if acc.Credits != 0 {
+				t.Fatalf("Credits should remain 0 for invalid input, got %v", acc.Credits)
+			}
+		})
+	}
+}
+
+func TestAccumulator_MeteringInvalidPreservesPriorValue(t *testing.T) {
+	var acc responseAccumulator
+	acc.ProcessEvent(kiroproto.Event{Type: "meteringEvent", Credits: 0.5})
+	acc.ProcessEvent(kiroproto.Event{Type: "meteringEvent", Credits: math.NaN()})
+	if !acc.HasCredits {
+		t.Fatal("HasCredits should stay true when a later metering is invalid")
+	}
+	if acc.Credits != 0.5 {
+		t.Fatalf("Credits = %v, want 0.5 (invalid event must not overwrite prior valid value)", acc.Credits)
 	}
 }
 

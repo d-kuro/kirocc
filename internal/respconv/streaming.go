@@ -309,6 +309,21 @@ func (s *SSEWriter) ContextUsagePercentage() float64 { return s.acc.ContextUsage
 // HasContextUsage reports whether a contextUsageEvent was received.
 func (s *SSEWriter) HasContextUsage() bool { return s.acc.HasContextUsage }
 
+// Credits returns the per-response credit consumption from meteringEvent.
+// The bool is false if no meteringEvent was received.
+func (s *SSEWriter) Credits() (float64, bool) { return s.acc.Credits, s.acc.HasCredits }
+
+// RecordTail forwards trailing metadata events (meteringEvent, contextUsageEvent)
+// to the inner accumulator without writing anything to the SSE stream. Used by
+// the tool-search orchestrator to keep collecting credit/context usage after the
+// upstream tool-use frame is detected, so cumulative stats remain accurate.
+func (s *SSEWriter) RecordTail(e kiroproto.Event) {
+	switch e.Type {
+	case kiroproto.EventMetering, kiroproto.EventContextUsage:
+		s.acc.ProcessEvent(e)
+	}
+}
+
 // writeThinkingDelta writes a thinking_delta SSE event using direct formatting.
 func (s *SSEWriter) writeThinkingDelta(d EventDelta) {
 	s.ensureStarted()

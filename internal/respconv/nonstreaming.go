@@ -16,6 +16,9 @@ type NonStreamingStats struct {
 	// Context usage from Kiro.
 	HasContextUsage        bool
 	ContextUsagePercentage float64
+	// Credit usage from meteringEvent.
+	HasCredits bool
+	Credits    float64
 }
 
 // NonStreamingAccumulator wraps responseAccumulator for incremental non-streaming processing.
@@ -58,6 +61,12 @@ func (n *NonStreamingAccumulator) IsEmptyVisibleEndTurn() bool {
 // ThinkingLen returns the length of accumulated thinking content.
 func (n *NonStreamingAccumulator) ThinkingLen() int {
 	return n.acc.ThinkingBuf.Len()
+}
+
+// Credits returns the per-response credit consumption from meteringEvent.
+// The bool is false if no meteringEvent was received.
+func (n *NonStreamingAccumulator) Credits() (float64, bool) {
+	return n.acc.Credits, n.acc.HasCredits
 }
 
 // BuildNonStreamingResponse builds a complete Anthropic response from buffered events.
@@ -115,6 +124,8 @@ func buildResponseFromAcc(acc *responseAccumulator, model string) (map[string]an
 		OutputTokens:           res.OutputTokens,
 		HasContextUsage:        acc.HasContextUsage,
 		ContextUsagePercentage: acc.ContextUsagePercentage,
+		HasCredits:             acc.HasCredits,
+		Credits:                acc.Credits,
 	}
 
 	return map[string]any{
