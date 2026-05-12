@@ -164,6 +164,12 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, w http.Res
 			if err != nil {
 				slog.ErrorContext(ctx, "stream error", "trace_id", short, "round", round+1, "err", err)
 			}
+			// If the stream is already promoted, sw.HandleEvent has already
+			// emitted an SSE error event for invalidStateEvent/exception;
+			// emitting another would produce duplicate/conflicting frames.
+			if sw.Started() && gw.IsPromoted() {
+				return ""
+			}
 			writeStreamingOrJSONError(gw, sw, w, http.StatusBadGateway, errTypeAPI, "upstream stream error")
 			return ""
 		}
