@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -16,6 +17,14 @@ import (
 	"github.com/d-kuro/kirocc/internal/logging"
 	"github.com/d-kuro/kirocc/internal/respconv"
 )
+
+// roundCredits rounds credit consumption to 3 decimals for human-readable
+// log output and OTel attributes. Kiro reports raw values like 0.19354654693200665
+// which are noisy at full precision; 0.001 (1 milli-credit) is the smallest
+// unit that matters for display.
+func roundCredits(c float64) float64 {
+	return math.Round(c*1000) / 1000
+}
 
 const retryReasonEmptyVisibleEndTurn = "empty_visible_end_turn"
 
@@ -214,9 +223,6 @@ func logResponseStats(ctx context.Context, short string, inputTokens, outputToke
 	if hasUsage {
 		contextUsage = fmt.Sprintf("%.1fk(%.1f%%)", float64(inputTokens)/1000, pct)
 	}
-	if hasCredits {
-		trace.SpanFromContext(ctx).SetAttributes(attribute.Float64("kiro.credits", credits))
-	}
 	args := []any{
 		"trace_id", short,
 		"session_id", logging.ShortID(logging.SessionIDFromContext(ctx)),
@@ -226,7 +232,9 @@ func logResponseStats(ctx context.Context, short string, inputTokens, outputToke
 		"context_usage", contextUsage,
 	}
 	if hasCredits {
-		args = append(args, "credits", credits)
+		rounded := roundCredits(credits)
+		trace.SpanFromContext(ctx).SetAttributes(attribute.Float64("kiro.credits", rounded))
+		args = append(args, "credits", rounded)
 	}
 	slog.InfoContext(ctx, "<-- POST /v1/messages", args...)
 	if hasUsage && pct >= 100 {
@@ -242,10 +250,11 @@ func logResponseStats(ctx context.Context, short string, inputTokens, outputToke
 // retry). The successful retry's credits flow through logResponseStats normally,
 // so this avoids under-reporting cumulative credit consumption.
 func logAbortedAttemptCredits(ctx context.Context, short string, credits float64, reason string) {
-	trace.SpanFromContext(ctx).SetAttributes(attribute.Float64("kiro.credits.aborted_attempt", credits))
+	rounded := roundCredits(credits)
+	trace.SpanFromContext(ctx).SetAttributes(attribute.Float64("kiro.credits.aborted_attempt", rounded))
 	slog.InfoContext(ctx, "upstream attempt credits (aborted)",
 		"trace_id", short,
-		"credits", credits,
+		"credits", rounded,
 		"reason", reason,
 	)
 }

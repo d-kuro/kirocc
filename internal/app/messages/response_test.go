@@ -43,7 +43,7 @@ func findRecord(t *testing.T, buf *bytes.Buffer, body string) map[string]any {
 
 func TestLogResponseStats_IncludesCredits(t *testing.T) {
 	buf := captureSlog(t)
-	logResponseStats(t.Context(), "abc123", 100, 50, true, 5.0, 200000, 0.5417, true)
+	logResponseStats(t.Context(), "abc123", 100, 50, true, 5.0, 200000, 0.19354654693200665, true)
 
 	rec := findRecord(t, buf, "<-- POST /v1/messages")
 	attrs, ok := rec["attributes"].(map[string]any)
@@ -54,8 +54,8 @@ func TestLogResponseStats_IncludesCredits(t *testing.T) {
 	if !ok {
 		t.Fatalf("credits attribute missing; attrs=%v", attrs)
 	}
-	if got != 0.5417 {
-		t.Fatalf("credits = %v, want 0.5417", got)
+	if got != 0.194 {
+		t.Fatalf("credits = %v, want 0.194 (rounded to 3 decimals)", got)
 	}
 }
 
@@ -73,9 +73,28 @@ func TestLogResponseStats_OmitsCreditsWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestRoundCredits(t *testing.T) {
+	cases := []struct {
+		in   float64
+		want float64
+	}{
+		{0.19354654693200665, 0.194},
+		{0.5417483374129354, 0.542},
+		{0.0004, 0},
+		{0.0005, 0.001}, // half rounds away from zero (math.Round)
+		{0, 0},
+		{1, 1},
+	}
+	for _, tc := range cases {
+		if got := roundCredits(tc.in); got != tc.want {
+			t.Errorf("roundCredits(%v) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestLogAbortedAttemptCredits(t *testing.T) {
 	buf := captureSlog(t)
-	logAbortedAttemptCredits(t.Context(), "abc123", 0.123, retryReasonEmptyVisibleEndTurn)
+	logAbortedAttemptCredits(t.Context(), "abc123", 0.12345, retryReasonEmptyVisibleEndTurn)
 
 	rec := findRecord(t, buf, "upstream attempt credits (aborted)")
 	attrs, ok := rec["attributes"].(map[string]any)
@@ -83,7 +102,7 @@ func TestLogAbortedAttemptCredits(t *testing.T) {
 		t.Fatal("attributes missing")
 	}
 	if attrs["credits"] != 0.123 {
-		t.Fatalf("credits = %v, want 0.123", attrs["credits"])
+		t.Fatalf("credits = %v, want 0.123 (rounded)", attrs["credits"])
 	}
 	if attrs["reason"] != retryReasonEmptyVisibleEndTurn {
 		t.Fatalf("reason = %v, want %q", attrs["reason"], retryReasonEmptyVisibleEndTurn)
