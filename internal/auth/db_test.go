@@ -220,6 +220,135 @@ func TestReadCredentials(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "social token with snake_case profile_arn populates region",
+			authKV: map[string]string{
+				"kirocli:social:token": `{"access_token":"a","refresh_token":"r","provider":"google","profile_arn":"arn:aws:codewhisperer:us-east-1:123456789012:profile/X"}`,
+			},
+			check: func(t *testing.T, c *Credentials) {
+				if c.AuthType != "social" {
+					t.Errorf("AuthType = %q, want %q", c.AuthType, "social")
+				}
+				if c.Region != "us-east-1" {
+					t.Errorf("Region = %q, want %q", c.Region, "us-east-1")
+				}
+				// SSORegion must remain empty when no explicit region is stored —
+				// only ARN-derived values are in play, which should not satisfy
+				// the OIDC refresh path's region check.
+				if c.SSORegion != "" {
+					t.Errorf("SSORegion = %q, want empty (ARN-derived region must not populate SSORegion)", c.SSORegion)
+				}
+				if c.ProfileARN != "arn:aws:codewhisperer:us-east-1:123456789012:profile/X" {
+					t.Errorf("ProfileARN = %q", c.ProfileARN)
+				}
+			},
+		},
+		{
+			name: "social token with camelCase profileArn",
+			authKV: map[string]string{
+				"kirocli:social:token": `{"accessToken":"a","refreshToken":"r","profileArn":"arn:aws:codewhisperer:eu-west-1:123:profile/Y"}`,
+			},
+			check: func(t *testing.T, c *Credentials) {
+				if c.Region != "eu-west-1" {
+					t.Errorf("Region = %q, want %q", c.Region, "eu-west-1")
+				}
+				if c.ProfileARN != "arn:aws:codewhisperer:eu-west-1:123:profile/Y" {
+					t.Errorf("ProfileARN = %q", c.ProfileARN)
+				}
+			},
+		},
+		{
+			name: "social token without region or ARN falls back to us-east-1",
+			authKV: map[string]string{
+				"kirocli:social:token": `{"accessToken":"a","refreshToken":"r"}`,
+			},
+			check: func(t *testing.T, c *Credentials) {
+				if c.Region != "us-east-1" {
+					t.Errorf("Region = %q, want %q", c.Region, "us-east-1")
+				}
+				if c.ProfileARN != "" {
+					t.Errorf("ProfileARN = %q, want empty", c.ProfileARN)
+				}
+			},
+		},
+		{
+			name: "token JSON profile_arn beats state ARN",
+			authKV: map[string]string{
+				"kirocli:social:token": `{"access_token":"a","refresh_token":"r","profile_arn":"arn:aws:codewhisperer:ap-northeast-1:111:profile/token"}`,
+			},
+			state: map[string]string{
+				"api.codewhisperer.profile": "arn:aws:codewhisperer:eu-west-1:222:profile/state",
+			},
+			check: func(t *testing.T, c *Credentials) {
+				if c.ProfileARN != "arn:aws:codewhisperer:ap-northeast-1:111:profile/token" {
+					t.Errorf("ProfileARN = %q, want token JSON ARN", c.ProfileARN)
+				}
+				if c.Region != "ap-northeast-1" {
+					t.Errorf("Region = %q, want %q", c.Region, "ap-northeast-1")
+				}
+			},
+		},
+		{
+			name: "token JSON region beats ARN region",
+			authKV: map[string]string{
+				"kirocli:social:token": `{"accessToken":"a","refreshToken":"r","region":"eu-west-1","profile_arn":"arn:aws:codewhisperer:us-east-1:123:profile/X"}`,
+			},
+			check: func(t *testing.T, c *Credentials) {
+				if c.Region != "eu-west-1" {
+					t.Errorf("Region = %q, want %q (token region must win over ARN region)", c.Region, "eu-west-1")
+				}
+			},
+		},
+		{
+			name: "IDC token without any region leaves SSORegion empty",
+			authKV: map[string]string{
+				"kirocli:odic:token": `{"accessToken":"a","refreshToken":"r","expiresAt":1}`,
+			},
+			// No state.auth.idc.region and no profile ARN.
+			check: func(t *testing.T, c *Credentials) {
+				if c.SSORegion != "" {
+					t.Errorf("SSORegion = %q, want empty so refreshCredentials fails fast for misconfigured IDC", c.SSORegion)
+				}
+				if c.Region != "us-east-1" {
+					t.Errorf("Region = %q, want %q (API region falls back)", c.Region, "us-east-1")
+				}
+			},
+		},
+		{
+			name: "IDC token with state profile ARN does not derive SSORegion from ARN",
+			authKV: map[string]string{
+				"kirocli:odic:token": `{"accessToken":"a","refreshToken":"r","expiresAt":1}`,
+			},
+			state: map[string]string{
+				"api.codewhisperer.profile": "arn:aws:codewhisperer:eu-west-1:123:profile/idc",
+			},
+			check: func(t *testing.T, c *Credentials) {
+				if c.SSORegion != "" {
+					t.Errorf("SSORegion = %q, want empty (ARN region must not leak into SSORegion)", c.SSORegion)
+				}
+				if c.Region != "eu-west-1" {
+					t.Errorf("Region = %q, want %q (API region may use ARN)", c.Region, "eu-west-1")
+				}
+			},
+		},
+		{
+			name: "IDC profile ARN region wins over SSO region for API endpoint",
+			authKV: map[string]string{
+				"kirocli:odic:token": `{"accessToken":"a","refreshToken":"r","expiresAt":1}`,
+			},
+			state: map[string]string{
+				"auth.idc.region":           "us-east-1", // OIDC SSO region
+				"api.codewhisperer.profile": "arn:aws:codewhisperer:eu-west-1:123:profile/idc",
+			},
+			check: func(t *testing.T, c *Credentials) {
+				if c.Region != "eu-west-1" {
+					t.Errorf("Region = %q, want %q (API region must come from profile ARN, not SSO region)", c.Region, "eu-west-1")
+				}
+				if c.SSORegion != "us-east-1" {
+					t.Errorf("SSORegion = %q, want %q (SSO region from auth.idc.region)", c.SSORegion, "us-east-1")
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

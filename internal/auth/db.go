@@ -69,6 +69,8 @@ func ReadCredentials(db *sql.DB) (*Credentials, error) {
 		RefreshTokenS string `json:"refresh_token"`
 		ExpiresAtS    any    `json:"expires_at"`
 		Region        string `json:"region"`
+		ProfileARN    string `json:"profileArn"`  // social camelCase
+		ProfileARNS   string `json:"profile_arn"` // social snake_case
 	}
 	if err := json.Unmarshal([]byte(tokenJSON), &tokenData); err != nil {
 		return nil, fmt.Errorf("parse token JSON: %w", err)
@@ -108,26 +110,30 @@ func ReadCredentials(db *sql.DB) (*Credentials, error) {
 		creds.ClientSecret = coalesce(regData.ClientSecret, regData.ClientSecretS)
 	}
 
-	// Region: prefer token's region, then state table.
 	stateRegion, stateErr := readState(db, "auth.idc.region")
 	if stateErr != nil && !errors.Is(stateErr, sql.ErrNoRows) {
 		return nil, stateErr
 	}
-	if tokenData.Region != "" {
-		creds.Region = tokenData.Region
-		creds.SSORegion = tokenData.Region
-	} else {
-		creds.Region = stateRegion
-		creds.SSORegion = stateRegion
-	}
 
-	// Read profile ARN from state table.
-	// May be a JSON object {"arn":"...","profile_name":"..."} or a plain string.
+	// State profile ARN may be a JSON object {"arn":"...","profile_name":"..."} or a plain string.
 	profileRaw, profileErr := readState(db, "api.codewhisperer.profile")
 	if profileErr != nil && !errors.Is(profileErr, sql.ErrNoRows) {
 		return nil, profileErr
 	}
-	creds.ProfileARN = extractProfileARN(profileRaw)
+	stateProfileARN := extractProfileARN(profileRaw)
+
+	// ProfileARN: token JSON wins (social login), state table is fallback (IDC).
+	tokenProfileARN := coalesce(tokenData.ProfileARN, tokenData.ProfileARNS)
+	creds.ProfileARN = coalesce(tokenProfileARN, stateProfileARN)
+
+	// SSORegion must come from an explicitly stored region (token JSON or state).
+	// Do not fall back to the ARN-derived region or "us-east-1" — refreshCredentials
+	// relies on an empty SSORegion to fail fast for misconfigured IDC credentials.
+	creds.SSORegion = coalesce(tokenData.Region, stateRegion)
+
+	// Region (API region used to build https://q.<region>.amazonaws.com/) can be
+	// derived from the profile ARN and falls back to "us-east-1" when unavailable.
+	creds.Region = resolveRegion(tokenData.Region, tokenProfileARN, stateRegion, stateProfileARN)
 
 	return creds, nil
 }
