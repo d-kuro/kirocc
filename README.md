@@ -259,6 +259,8 @@ Supported query forms:
 | `claude-sonnet-4-6[1m]` | `claude-sonnet-4.6-1m` | 1M             |
 | `claude-sonnet-4.5`     | `claude-sonnet-4.5`    | 200k           |
 | `claude-sonnet-4.5[1m]` | `claude-sonnet-4.5-1m` | 1M             |
+| `claude-opus-4-8`       | `claude-opus-4.8`      | 1M             |
+| `claude-opus-4-8[1m]`   | `claude-opus-4.8`      | 1M             |
 | `claude-opus-4-7`       | `claude-opus-4.7`      | 1M             |
 | `claude-opus-4-7[1m]`   | `claude-opus-4.7`      | 1M             |
 | `claude-opus-4-6`       | `claude-opus-4.6`      | 1M             |
@@ -266,7 +268,7 @@ Supported query forms:
 | `claude-opus-4.5`       | `claude-opus-4.5`      | 200k           |
 | `claude-haiku-4.5`      | `claude-haiku-4.5`     | 200k           |
 
-Opus 4.6 and 4.7 always use 1M context (no 200k SKU exists upstream). The explicit `[1m]`-suffixed aliases (`claude-opus-4-7[1m]` / `claude-opus-4-6[1m]`) are first-class entries that preserve the suffix verbatim in the response `model` field — this matches Claude Code's default Max-plan state (`lG()` emits `claude-opus-4-7[1m]`) and keeps its `mR()` 1M-context check happy without spuriously enabling extended thinking. Thinking is still opt-in via Sonnet `[1m]` suffix, `Anthropic-Beta: context-1m` header, or `thinking` field.
+Opus 4.6, 4.7, and 4.8 always use 1M context (no 200k SKU exists upstream). The explicit `[1m]`-suffixed aliases (`claude-opus-4-8[1m]` / `claude-opus-4-7[1m]` / `claude-opus-4-6[1m]`) are first-class entries that preserve the suffix verbatim in the response `model` field — this matches Claude Code's default Max-plan state (`lG()` emits `claude-opus-4-8[1m]`) and keeps its `mR()` 1M-context check happy without spuriously enabling extended thinking. Thinking is still opt-in via Sonnet `[1m]` suffix, `Anthropic-Beta: context-1m` header, or `thinking` field.
 
 Unmatched `claude-*` models are passed through as-is. Non-claude models fall back to `claude-sonnet-4.6`.
 
@@ -274,7 +276,7 @@ Unmatched `claude-*` models are passed through as-is. Non-claude models fall bac
 
 The `model` field in `/v1/messages` responses (streaming `message_start`, non-streaming body, and tool-search path) is returned as the **Anthropic-form ID** (e.g. `claude-opus-4-7`), not the Kiro SKU (`claude-opus-4.7`).
 
-When the proxy routes to a **1M context window** (always-1M SKU such as `claude-opus-4.7` / `claude-opus-4.6`, or a model invoked with the `[1m]` suffix or `Anthropic-Beta: context-1m` header), a trailing `[1m]` is appended to the response model ID (e.g. `claude-opus-4-7[1m]`). Claude Code's client-side context-window logic matches `/\[1m\]/i` on the response model to pick the 1M window — without the suffix it defaults to 200k and auto-compacts at ~160k even when upstream actually has 1M of context.
+When the proxy routes to a **1M context window** (always-1M SKU such as `claude-opus-4.8` / `claude-opus-4.7` / `claude-opus-4.6`, or a model invoked with the `[1m]` suffix or `Anthropic-Beta: context-1m` header), a trailing `[1m]` is appended to the response model ID (e.g. `claude-opus-4-8[1m]`). Claude Code's client-side context-window logic matches `/\[1m\]/i` on the response model to pick the 1M window — without the suffix it defaults to 200k and auto-compacts at ~160k even when upstream actually has 1M of context.
 
 Note: `[1m]` has different meanings on request vs. response. On the **request** `model` it is a client-supplied thinking-opt-in signal (and is stripped before upstream routing). On the **response** `model` it is purely a context-window advertisement for Claude Code and does not imply that extended thinking was enabled.
 

@@ -27,8 +27,10 @@ const (
 // Uses exact key matching against both Anthropic and Kiro fields (first match wins).
 // Order matters: specific entries must precede legacy aliases that share the same Kiro value.
 var modelMapOrdered = []Mapping{
+	{Anthropic: "claude-opus-4-8[1m]", Kiro: "claude-opus-4.8", Kiro1M: "claude-opus-4.8"},
 	{Anthropic: "claude-opus-4-7[1m]", Kiro: "claude-opus-4.7", Kiro1M: "claude-opus-4.7"},
 	{Anthropic: "claude-opus-4-6[1m]", Kiro: "claude-opus-4.6", Kiro1M: "claude-opus-4.6"},
+	{Anthropic: "claude-opus-4-8", Kiro: "claude-opus-4.8", Kiro1M: "claude-opus-4.8"},
 	{Anthropic: "claude-opus-4-7", Kiro: "claude-opus-4.7", Kiro1M: "claude-opus-4.7"},
 	{Anthropic: "claude-sonnet-4-6", Kiro: "claude-sonnet-4.6", Kiro1M: "claude-sonnet-4.6-1m"},
 	{Anthropic: "claude-sonnet-4.5", Kiro: "claude-sonnet-4.5", Kiro1M: "claude-sonnet-4.5-1m"},
