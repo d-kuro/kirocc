@@ -2,19 +2,18 @@ package reqconv
 
 import (
 	"encoding/json/v2"
+	"strings"
 	"testing"
 
 	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 )
 
-func buildPayloadForTest(req *anthropic.Request, profileARN, modelID, conversationID string, thinking bool, thinkingBudget int) (*kiroproto.Payload, error) {
+func buildPayloadForTest(req *anthropic.Request, profileARN, modelID, conversationID string) (*kiroproto.Payload, error) {
 	p, _, err := BuildPayload(req, BuildOptions{
 		ProfileARN:     profileARN,
 		ModelID:        modelID,
 		ConversationID: conversationID,
-		Thinking:       thinking,
-		ThinkingBudget: thinkingBudget,
 	})
 	return p, err
 }
@@ -26,7 +25,7 @@ func TestBuildPayload_SimpleMessage(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "arn:test", "claude-sonnet-4.6", "conv-test", false, 0)
+	payload, err := buildPayloadForTest(req, "arn:test", "claude-sonnet-4.6", "conv-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +60,7 @@ func TestBuildPayload_SystemPromptInHistory(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "How are you?"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +104,7 @@ func TestBuildPayload_SystemPromptNoHistory(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +132,7 @@ func TestBuildPayload_LastAssistant(t *testing.T) {
 			{Role: "assistant", Content: anthropic.MessageContent{Text: "Hi there"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +172,7 @@ func TestBuildPayload_ToolUseFlow(t *testing.T) {
 			},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,98 +207,160 @@ func TestBuildPayload_ToolUseFlow(t *testing.T) {
 	}
 }
 
-func TestBuildPayload_ThinkingXML_ToolResultOnly(t *testing.T) {
-	// Tool-result-only continuation with thinking enabled should NOT inject XML tags.
+func TestBuildPayload_NoThinkingXMLInjected(t *testing.T) {
+	// Effort is now sent natively via additionalModelRequestFields; no XML tags
+	// are ever injected into the user content, regardless of effort.
 	req := &anthropic.Request{
-		Model: "claude-sonnet-4-6",
-		Tools: []anthropic.Tool{
-			{Name: "get_weather", Description: "Get weather", InputSchema: map[string]any{"type": "object"}},
-		},
-		Messages: []anthropic.Message{
-			{Role: "user", Content: anthropic.MessageContent{Text: "Weather?"}},
-			{
-				Role: "assistant",
-				Content: anthropic.MessageContent{
-					Blocks: []anthropic.ContentBlock{
-						{Type: "tool_use", ID: "toolu_01", Name: "get_weather", Input: map[string]any{"city": "Tokyo"}},
-					},
-				},
-			},
-			{
-				Role: "user",
-				Content: anthropic.MessageContent{
-					Blocks: []anthropic.ContentBlock{
-						{Type: "tool_result", ToolUseID: "toolu_01", Content: anthropic.MessageContent{Text: "Sunny"}},
-					},
-				},
-			},
-		},
-	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", true, 10000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := payload.ConversationState.CurrentMessage.UserInputMessage.Content
-	// Tool-result-only continuation should keep empty content, no XML tags.
-	if content != "" {
-		t.Fatalf("tool-result-only content should be empty, got %q", content)
-	}
-}
-
-func TestBuildPayload_ThinkingMode(t *testing.T) {
-	req := &anthropic.Request{
-		Model: "claude-sonnet-4-6",
+		Model: "claude-opus-4-8",
 		Messages: []anthropic.Message{
 			{Role: "user", Content: anthropic.MessageContent{Text: "Think about this."}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", true, 0)
+	payload, _, err := BuildPayload(req, BuildOptions{ModelID: "claude-opus-4.8", ConversationID: "conv-test", Effort: "xhigh"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	content := payload.ConversationState.CurrentMessage.UserInputMessage.Content
-	// Should contain XML thinking tags (prompt injection approach).
-	if !contains(content, "<thinking_mode>enabled</thinking_mode>") {
-		t.Fatalf("should contain thinking_mode tag, got %q", content)
+	if contains(content, "<thinking_mode>") || contains(content, "<max_thinking_length>") {
+		t.Fatalf("content must not contain thinking XML, got %q", content)
 	}
-	if !contains(content, "<max_thinking_length>10000</max_thinking_length>") {
-		t.Fatalf("should contain default max_thinking_length, got %q", content)
+	if content != "Think about this." {
+		t.Fatalf("content = %q, want verbatim user text", content)
 	}
-	// Original user text should still be present.
-	if !contains(content, "Think about this.") {
-		t.Fatalf("should contain original user text, got %q", content)
+}
+
+func TestBuildPayload_EffortNative(t *testing.T) {
+	req := &anthropic.Request{
+		Model: "claude-opus-4-8",
+		Messages: []anthropic.Message{
+			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
+		},
 	}
-	// Should NOT have thinking tool in tools array.
-	ctx := payload.ConversationState.CurrentMessage.UserInputMessage.UserInputMessageContext
-	if ctx != nil {
-		for _, te := range ctx.Tools {
-			if te.ToolSpecification != nil && te.ToolSpecification.Name == ThinkingToolName {
-				t.Fatal("thinking tool should not be present (using prompt injection)")
+	payload, _, err := BuildPayload(req, BuildOptions{ModelID: "claude-opus-4.8", ConversationID: "conv-test", Effort: "max"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	amrf := payload.AdditionalModelRequestFields
+	if amrf == nil || amrf.OutputConfig == nil {
+		t.Fatal("expected additionalModelRequestFields.output_config")
+	}
+	if amrf.OutputConfig.Effort != "max" {
+		t.Fatalf("effort = %q, want max", amrf.OutputConfig.Effort)
+	}
+}
+
+func TestBuildPayload_EffortOmittedWhenEmpty(t *testing.T) {
+	req := &anthropic.Request{
+		Model: "claude-opus-4-8",
+		Messages: []anthropic.Message{
+			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
+		},
+	}
+	payload, err := buildPayloadForTest(req, "", "claude-opus-4.8", "conv-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.AdditionalModelRequestFields != nil {
+		t.Fatalf("additionalModelRequestFields should be nil when no effort, got %+v", payload.AdditionalModelRequestFields)
+	}
+}
+
+func TestBuildPayload_EnvStateOnCurrentMessageOnly(t *testing.T) {
+	req := &anthropic.Request{
+		Model:  "claude-sonnet-4-6",
+		System: anthropic.SystemPrompt{Text: "You are helpful.\n<env>\nWorking directory: /tmp/x\nPlatform: darwin\n</env>"},
+		Messages: []anthropic.Message{
+			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
+			{Role: "assistant", Content: anthropic.MessageContent{Text: "Hi"}},
+			{Role: "user", Content: anthropic.MessageContent{Text: "How are you?"}},
+		},
+	}
+	payload, _, err := BuildPayload(req, BuildOptions{ModelID: "claude-sonnet-4.6", ConversationID: "conv-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Current message carries envState (derived from the <env> block).
+	curCtx := payload.ConversationState.CurrentMessage.UserInputMessage.UserInputMessageContext
+	if curCtx == nil || curCtx.EnvState == nil {
+		t.Fatal("current message should carry envState")
+	}
+	if curCtx.EnvState.OperatingSystem != "macos" || curCtx.EnvState.CurrentWorkingDirectory != "/tmp/x" {
+		t.Fatalf("envState = %+v", curCtx.EnvState)
+	}
+
+	// No history entry carries envState.
+	for i, h := range payload.ConversationState.History {
+		if h.UserInputMessage != nil && h.UserInputMessage.UserInputMessageContext != nil {
+			if h.UserInputMessage.UserInputMessageContext.EnvState != nil {
+				t.Fatalf("history[%d] should not carry envState", i)
 			}
 		}
 	}
 }
 
-func TestBuildPayload_ThinkingMode_NoThinking(t *testing.T) {
+func TestBuildPayload_EnvStateOmittedWhenNil(t *testing.T) {
 	req := &anthropic.Request{
 		Model: "claude-sonnet-4-6",
 		Messages: []anthropic.Message{
 			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Should NOT have thinking tool when thinking is disabled.
-	ctx := payload.ConversationState.CurrentMessage.UserInputMessage.UserInputMessageContext
-	if ctx != nil {
-		for _, te := range ctx.Tools {
-			if te.ToolSpecification != nil && te.ToolSpecification.Name == ThinkingToolName {
-				t.Fatal("thinking tool should not be present when thinking is disabled")
-			}
-		}
+	// No tools, no tool results, no envState → no userInputMessageContext at all.
+	if payload.ConversationState.CurrentMessage.UserInputMessage.UserInputMessageContext != nil {
+		t.Fatal("userInputMessageContext should be nil when nothing to attach")
 	}
+}
+
+// TestBuildPayload_WireFieldOrder pins the JSON field order: additionalModelRequestFields
+// after profileArn at the root, and envState before tools within
+// userInputMessageContext — matching the captured kiro-cli 2.5.1 wire format.
+func TestBuildPayload_WireFieldOrder(t *testing.T) {
+	req := &anthropic.Request{
+		Model:  "claude-opus-4-8",
+		System: anthropic.SystemPrompt{Text: "<env>\nWorking directory: /tmp/x\nPlatform: darwin\n</env>"},
+		Tools: []anthropic.Tool{
+			{Name: "get_weather", Description: "Get weather", InputSchema: map[string]any{"type": "object"}},
+		},
+		Messages: []anthropic.Message{
+			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
+		},
+	}
+	payload, _, err := BuildPayload(req, BuildOptions{ProfileARN: "arn:test", ModelID: "claude-opus-4.8", ConversationID: "conv-test", Effort: "xhigh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+
+	profileIdx := indexOf(s, `"profileArn"`)
+	amrfIdx := indexOf(s, `"additionalModelRequestFields"`)
+	if profileIdx < 0 || amrfIdx < 0 {
+		t.Fatalf("missing root fields in %s", s)
+	}
+	if profileIdx > amrfIdx {
+		t.Fatalf("profileArn must come before additionalModelRequestFields; got %s", s)
+	}
+
+	envIdx := indexOf(s, `"envState"`)
+	toolsIdx := indexOf(s, `"tools"`)
+	if envIdx < 0 || toolsIdx < 0 {
+		t.Fatalf("missing envState/tools in %s", s)
+	}
+	if envIdx > toolsIdx {
+		t.Fatalf("envState must come before tools; got %s", s)
+	}
+}
+
+func indexOf(haystack, needle string) int {
+	return strings.Index(haystack, needle)
 }
 
 func TestBuildPayload_EmptyProfileARN(t *testing.T) {
@@ -309,7 +370,7 @@ func TestBuildPayload_EmptyProfileARN(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +409,7 @@ func TestBuildPayload_ThinkingInHistory(t *testing.T) {
 			{Name: "bash", Description: "Run bash", InputSchema: map[string]any{"type": "object"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", true, 0)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +463,7 @@ func TestBuildPayload_ThinkingPendingToCurrentMessage(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "Follow up"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", true, 0)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,7 +561,7 @@ func TestBuildPayload_Doc09_FullExample(t *testing.T) {
 		},
 	}
 
-	payload, err := buildPayloadForTest(req, "arn:aws:codewhisperer:us-east-1:123456789:profile/example", "claude-sonnet-4.6", "conv-test", false, 0)
+	payload, err := buildPayloadForTest(req, "arn:aws:codewhisperer:us-east-1:123456789:profile/example", "claude-sonnet-4.6", "conv-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -582,7 +643,7 @@ func TestBuildPayload_NoContextWhenNoToolsOrResults(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "How are you?"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -614,7 +675,7 @@ func TestBuildPayload_ToolResultsInHistory(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "Thanks"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +701,7 @@ func TestBuildPayload_AssistantMessageID(t *testing.T) {
 			{Role: "user", Content: anthropic.MessageContent{Text: "How are you?"}},
 		},
 	}
-	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test", false, 0)
+	payload, err := buildPayloadForTest(req, "", "claude-sonnet-4.6", "conv-test")
 	if err != nil {
 		t.Fatal(err)
 	}

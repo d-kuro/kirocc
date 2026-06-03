@@ -131,7 +131,7 @@ func ReadCredentials(db *sql.DB) (*Credentials, error) {
 	// relies on an empty SSORegion to fail fast for misconfigured IDC credentials.
 	creds.SSORegion = coalesce(tokenData.Region, stateRegion)
 
-	// Region (API region used to build https://q.<region>.amazonaws.com/) can be
+	// Region (API region used to build https://runtime.<region>.kiro.dev/) can be
 	// derived from the profile ARN and falls back to "us-east-1" when unavailable.
 	creds.Region = resolveRegion(tokenData.Region, tokenProfileARN, stateRegion, stateProfileARN)
 

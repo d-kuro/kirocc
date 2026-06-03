@@ -73,39 +73,94 @@ func TestE2E_ToolResultOnly(t *testing.T) {
 	}
 }
 
-func TestE2E_ThinkingMode_XMLInjection(t *testing.T) {
+func TestE2E_EffortNative_NoXMLInjection(t *testing.T) {
 	p1 := mustJSON(map[string]string{"content": "result"})
 	client := &capturingClient{events: []any{"assistantResponseEvent", p1}}
 
 	srv := newE2EServer(t, client)
 	defer srv.Close()
 
-	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6[1m]","messages":[{"role":"user","content":"think about this"}],"stream":false}`)
+	// opus-4.8 supports effort; output_config.effort travels natively.
+	resp := postMessages(t, srv.URL, `{"model":"claude-opus-4-8","messages":[{"role":"user","content":"think about this"}],"output_config":{"effort":"xhigh"},"stream":false}`)
 	defer func() { _ = resp.Body.Close() }()
 
 	requireStatus(t, resp, 200)
 	requireCaptured(t, client)
 
 	content := client.captured.ConversationState.CurrentMessage.UserInputMessage.Content
-	// Should contain XML thinking tags (prompt injection approach).
-	if !strings.Contains(content, "<thinking_mode>enabled</thinking_mode>") {
-		t.Fatalf("should contain thinking_mode tag: %q", content)
+	// No XML injection — content is the verbatim user text.
+	if strings.Contains(content, "<thinking_mode>") || strings.Contains(content, "<max_thinking_length>") {
+		t.Fatalf("content must not contain thinking XML: %q", content)
 	}
-	if !strings.Contains(content, "<max_thinking_length>") {
-		t.Fatalf("should contain max_thinking_length tag: %q", content)
+	if content != "think about this" {
+		t.Fatalf("content = %q, want verbatim user text", content)
 	}
-	// Original user text should still be present.
-	if !strings.Contains(content, "think about this") {
-		t.Fatalf("should contain original user text: %q", content)
+	// Effort is forwarded via additionalModelRequestFields.
+	amrf := client.captured.AdditionalModelRequestFields
+	if amrf == nil || amrf.OutputConfig == nil {
+		t.Fatal("expected additionalModelRequestFields.output_config to be forwarded")
 	}
-	// Should NOT have thinking tool in tools array.
+	if amrf.OutputConfig.Effort != "xhigh" {
+		t.Fatalf("effort = %q, want xhigh", amrf.OutputConfig.Effort)
+	}
+}
+
+// TestE2E_ThinkingWithoutEffort_SendsDefaultEffort verifies that a request which
+// enables reasoning via thinking.type but specifies no output_config.effort
+// still forwards a native effort level, so the "thinking on" intent reaches the
+// backend (kiro-cli 2.5.1 expresses all reasoning depth through effort).
+func TestE2E_ThinkingWithoutEffort_SendsDefaultEffort(t *testing.T) {
+	p1 := mustJSON(map[string]string{"content": "ok"})
+	client := &capturingClient{events: []any{"assistantResponseEvent", p1}}
+
+	srv := newE2EServer(t, client)
+	defer srv.Close()
+
+	// thinking.type=enabled on an effort-capable model, no explicit effort.
+	resp := postMessages(t, srv.URL, `{"model":"claude-opus-4-8","messages":[{"role":"user","content":"hi"}],"thinking":{"type":"enabled","budget_tokens":1024},"stream":false}`)
+	defer func() { _ = resp.Body.Close() }()
+
+	requireStatus(t, resp, 200)
+	requireCaptured(t, client)
+
+	amrf := client.captured.AdditionalModelRequestFields
+	if amrf == nil || amrf.OutputConfig == nil {
+		t.Fatal("thinking-enabled request should forward a default effort natively")
+	}
+	if amrf.OutputConfig.Effort != "medium" {
+		t.Fatalf("default effort = %q, want medium", amrf.OutputConfig.Effort)
+	}
+}
+
+func TestE2E_EnvStateFromSystemPrompt(t *testing.T) {
+	p1 := mustJSON(map[string]string{"content": "ok"})
+	client := &capturingClient{events: []any{"assistantResponseEvent", p1}}
+
+	srv := newE2EServer(t, client)
+	defer srv.Close()
+
+	// System prompt carries a Claude Code <env> block.
+	reqBody := `{
+		"model":"claude-sonnet-4-6",
+		"system":"You are Claude Code.\n<env>\nWorking directory: /tmp/proj\nPlatform: darwin\n</env>",
+		"messages":[{"role":"user","content":"hi"}],
+		"stream":false
+	}`
+	resp := postMessages(t, srv.URL, reqBody)
+	defer func() { _ = resp.Body.Close() }()
+
+	requireStatus(t, resp, 200)
+	requireCaptured(t, client)
+
 	ctx := client.captured.ConversationState.CurrentMessage.UserInputMessage.UserInputMessageContext
-	if ctx != nil {
-		for _, te := range ctx.Tools {
-			if te.ToolSpecification != nil && te.ToolSpecification.Name == "thinking" {
-				t.Fatal("thinking tool should not be present (using prompt injection)")
-			}
-		}
+	if ctx == nil || ctx.EnvState == nil {
+		t.Fatal("expected envState forwarded on current message")
+	}
+	if ctx.EnvState.OperatingSystem != "macos" {
+		t.Fatalf("operatingSystem = %q, want macos", ctx.EnvState.OperatingSystem)
+	}
+	if ctx.EnvState.CurrentWorkingDirectory != "/tmp/proj" {
+		t.Fatalf("currentWorkingDirectory = %q, want /tmp/proj", ctx.EnvState.CurrentWorkingDirectory)
 	}
 }
 

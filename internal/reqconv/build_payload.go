@@ -1,25 +1,22 @@
 package reqconv
 
 import (
-	"fmt"
-
 	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 	"github.com/d-kuro/kirocc/internal/toolsearch"
 	"github.com/google/uuid"
 )
 
-// defaultThinkingBudget is the default thinking token budget (medium).
-const defaultThinkingBudget = anthropic.ThinkingBudgetMedium
-
 // BuildOptions controls how an Anthropic request is mapped to a Kiro payload.
 type BuildOptions struct {
 	ProfileARN     string
 	ModelID        string
 	ConversationID string
-	Thinking       bool
-	ThinkingBudget int
-	ToolSearchCtx  *toolsearch.Context
+	// Effort is the resolved reasoning effort level (low/medium/high/xhigh/max).
+	// Empty means the model does not support effort or none was requested, in
+	// which case additionalModelRequestFields is omitted entirely.
+	Effort        string
+	ToolSearchCtx *toolsearch.Context
 }
 
 // BuildPayload converts an Anthropic request into a Kiro API payload.
@@ -28,6 +25,10 @@ func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payl
 
 	// 1. Build system prompt and convert tools.
 	systemPrompt, toolEntries := buildSystemAndTools(req, options.ToolSearchCtx, nameMap)
+
+	// envState is derived from the system prompt's <env> block (no host
+	// fallback) and only ever attached to the current message.
+	envState := ParseEnvState(systemPrompt)
 
 	// 2. Normalize and split messages.
 	hasTools := len(req.Tools) > 0
@@ -47,7 +48,7 @@ func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payl
 	if len(historyMsgs) > 0 {
 		precedingToolUseIDs = extractToolUseIDs(historyMsgs[len(historyMsgs)-1])
 	}
-	userInputMessage := buildCurrentMessage(lastMsg, lastContent, options.ModelID, toolEntries, options.Thinking, options.ThinkingBudget, precedingToolUseIDs)
+	userInputMessage := buildCurrentMessage(lastMsg, lastContent, options.ModelID, toolEntries, envState, precedingToolUseIDs)
 
 	convState := kiroproto.ConversationState{
 		ConversationID:  options.ConversationID,
@@ -61,6 +62,11 @@ func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payl
 	payload := &kiroproto.Payload{ConversationState: convState}
 	if options.ProfileARN != "" {
 		payload.ProfileARN = options.ProfileARN
+	}
+	if options.Effort != "" {
+		payload.AdditionalModelRequestFields = &kiroproto.AdditionalModelRequestFields{
+			OutputConfig: &kiroproto.OutputConfig{Effort: options.Effort},
+		}
 	}
 	return payload, nameMap, nil
 }
@@ -132,7 +138,7 @@ func placeSystemPrompt(systemPrompt string, history []kiroproto.HistoryEntry, la
 }
 
 // buildCurrentMessage constructs the Kiro UserInputMessage from the last Anthropic message.
-func buildCurrentMessage(lastMsg anthropic.Message, lastContent, modelID string, toolEntries []kiroproto.ToolEntry, thinking bool, thinkingBudget int, precedingToolUseIDs []string) kiroproto.UserInputMessage {
+func buildCurrentMessage(lastMsg anthropic.Message, lastContent, modelID string, toolEntries []kiroproto.ToolEntry, envState *kiroproto.EnvState, precedingToolUseIDs []string) kiroproto.UserInputMessage {
 	msg := kiroproto.UserInputMessage{
 		Content: lastContent,
 		ModelID: modelID,
@@ -142,8 +148,12 @@ func buildCurrentMessage(lastMsg anthropic.Message, lastContent, modelID string,
 	// Single-pass scan of lastMsg.Content to extract both tool_results and images.
 	toolResults, images := scanCurrentMessage(lastMsg.Content)
 	toolResults = ReorderToolResults(toolResults, precedingToolUseIDs)
-	if len(toolEntries) > 0 || len(toolResults) > 0 {
+	if envState != nil || len(toolEntries) > 0 || len(toolResults) > 0 {
+		// Field order matches the wire format: envState before tools.
 		ctx := &kiroproto.UserInputMessageContext{}
+		if envState != nil {
+			ctx.EnvState = envState
+		}
 		if len(toolEntries) > 0 {
 			ctx.Tools = toolEntries
 		}
@@ -161,22 +171,6 @@ func buildCurrentMessage(lastMsg anthropic.Message, lastContent, modelID string,
 
 	if len(images) > 0 {
 		msg.Images = images
-	}
-
-	// Inject thinking mode XML tags after all content decisions are finalized.
-	// Skip injection for tool-result-only continuations (content="" with toolResults)
-	// to preserve the empty content shape that upstream expects.
-	if thinking && (msg.Content != "" || len(toolResults) == 0) {
-		budget := thinkingBudget
-		if budget <= 0 {
-			budget = defaultThinkingBudget
-		}
-		prefix := fmt.Sprintf("<thinking_mode>enabled</thinking_mode>\n<max_thinking_length>%d</max_thinking_length>", budget)
-		if msg.Content != "" {
-			msg.Content = prefix + "\n\n" + msg.Content
-		} else {
-			msg.Content = prefix
-		}
 	}
 
 	return msg

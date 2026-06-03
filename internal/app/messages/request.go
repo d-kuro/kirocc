@@ -39,7 +39,11 @@ func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 
 	ccSessionID := r.Header.Get(headerCCSessionID)
 
-	payload, _, err := reqconv.BuildPayload(req, reqconv.BuildOptions{ProfileARN: profileARN, ModelID: kiroModel, ConversationID: ccSessionID, Thinking: thinking, ThinkingBudget: 0})
+	// Mirror the live send path so token counts include effort (envState is
+	// derived inside BuildPayload from the system prompt).
+	effort := resolveEffort(r.Context(), kiroModel, req, thinking)
+
+	payload, _, err := reqconv.BuildPayload(req, reqconv.BuildOptions{ProfileARN: profileARN, ModelID: kiroModel, ConversationID: ccSessionID, Effort: effort})
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 		return

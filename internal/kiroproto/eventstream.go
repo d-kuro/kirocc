@@ -15,7 +15,6 @@ import (
 type Event struct {
 	Type         string // event type from header
 	Content      string // assistantResponseEvent → content field
-	ModelID      string // assistantResponseEvent → modelId field
 	ThinkingText string // reasoningContentEvent → text field
 	ToolName     string // toolUseEvent
 	ToolUseID    string
@@ -122,12 +121,11 @@ func ParseStream(ctx context.Context, r io.Reader, callback func(Event) bool) er
 		case EventAssistantResponse:
 			var m struct {
 				Content string `json:"content"`
-				ModelID string `json:"modelId"`
 			}
 			if err := json.Unmarshal(payload, &m); err != nil {
 				return fmt.Errorf("decode %s: %w", eventType, err)
 			}
-			stop = callback(Event{Type: eventType, Content: m.Content, ModelID: m.ModelID})
+			stop = callback(Event{Type: eventType, Content: m.Content})
 
 		case EventReasoningContent:
 			var m struct {
