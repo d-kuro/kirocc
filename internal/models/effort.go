@@ -1,5 +1,7 @@
 package models
 
+import "slices"
+
 // Effort levels accepted by output_config.effort, ordered low → high.
 const (
 	EffortLow    = "low"
@@ -54,10 +56,8 @@ func ResolveEffort(kiroModel, requested string) string {
 	if !ok {
 		return ""
 	}
-	for _, e := range enum {
-		if e == requested {
-			return requested
-		}
+	if slices.Contains(enum, requested) {
+		return requested
 	}
 	return enum[len(enum)-1]
 }

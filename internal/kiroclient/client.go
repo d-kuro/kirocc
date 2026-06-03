@@ -190,7 +190,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 	invocationID := uuid.New().String()
 	traceID, short := logging.TraceIDs(ctx)
 
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for attempt := range maxAttempts {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
 			return nil, fmt.Errorf("create request: %w", err)
