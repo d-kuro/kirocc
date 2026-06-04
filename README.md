@@ -11,7 +11,7 @@ Just set `ANTHROPIC_BASE_URL` from any Anthropic API client (e.g., Claude Code) 
 - **Response conversion** — Converts Kiro event streams back to Anthropic SSE format
 - **Automatic auth management** — Reads credentials from Kiro CLI's SQLite DB with automatic token refresh (Social / OIDC)
 - **Model mapping** — Maps Anthropic model names (e.g., `claude-sonnet-4-6`) to Kiro model names. Customizable via environment variable
-- **Extended Thinking** — Supports `[1m]` suffix, `thinking` field, `output_config.effort`, and `budget_tokens` for extended thinking mode
+- **Extended Thinking** — Enable via the `[1m]` suffix, the `thinking` field, or `output_config.effort`. Reasoning depth travels natively as `additionalModelRequestFields.output_config.effort` (validated against each model's enum; defaults to `medium` for effort-capable models when thinking is on without an explicit effort)
 - **Tool Search** — Proxy-side implementation of Anthropic's [Tool Search Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool). Supports `tool_search_tool_regex_20251119` and `tool_search_tool_bm25_20251119` with `defer_loading` for on-demand tool discovery
 - **Prompt Caching** — Converts Anthropic tool-level `cache_control` to Kiro `cachePoint`
 - **Truncation detection** — Automatically injects a notice into the next request when a response is truncated
@@ -158,7 +158,8 @@ flowchart TB
             MsgNorm["Message Normalization"]
             ToolConv["Tool & Schema Conversion"]
             ToolSearch["Tool Search<br/>(regex / BM25)"]
-            ThinkingInject["Thinking Injection<br/>(XML tags in content)"]
+            EffortResolve["Effort Resolution<br/>(native output_config.effort)"]
+            EnvState["Env State<br/>(&lt;env&gt; block → operatingSystem/cwd, current message only)"]
             CacheConv["Cache Point Conversion<br/>(tool-level only)"]
         end
 
@@ -173,7 +174,7 @@ flowchart TB
     end
 
     subgraph Kiro ["Kiro API"]
-        KiroAPI["q.{region}.amazonaws.com"]
+        KiroAPI["runtime.{region}.kiro.dev"]
     end
 
     CC -- "Anthropic Messages API<br/>(JSON / SSE)" --> MW
@@ -196,8 +197,9 @@ flowchart TB
    - Converts tools and sanitizes JSON Schema (removes unsupported keywords, flattens `anyOf`/`oneOf`/`allOf`)
    - If tool search tools are present, partitions tools into active/deferred and injects a proxy-side `ToolSearch` tool
    - Extracts system prompt and places it as a history entry pair
+   - Parses the `<env>` block from the system prompt into `envState` (`operatingSystem`, `currentWorkingDirectory`) and attaches it to the current message only
    - Reorders tool results to match the preceding assistant's tool_use order
-   - Injects thinking mode as XML tags (`<thinking_mode>`, `<max_thinking_length>`) into message content
+   - Forwards reasoning effort natively as `additionalModelRequestFields.output_config.effort` at the request root (sibling of `conversationState`); the resolved effort is validated/clamped per model
    - Converts Anthropic tool-level `cache_control` to Kiro `cachePoint`
 6. Kiro API returns an AWS Event Stream (binary frames)
 7. Response conversion pipeline:
@@ -211,13 +213,15 @@ flowchart TB
 
 ### Extended Thinking
 
-The Kiro API does not have a dedicated field for thinking configuration. kirocc injects thinking parameters as XML tags into the message content:
+kiro-cli 2.5.1 expresses reasoning depth natively through `output_config.effort`. kirocc forwards it as `additionalModelRequestFields.output_config.effort` at the request root (sibling of `conversationState`):
 
-```
-<thinking_mode>enabled</thinking_mode>
-<max_thinking_length>{budget_tokens}</max_thinking_length>
-
-{user message}
+```json
+{
+  "conversationState": { "...": "..." },
+  "additionalModelRequestFields": {
+    "output_config": { "effort": "medium" }
+  }
+}
 ```
 
 Thinking is enabled by any of:
@@ -226,11 +230,19 @@ Thinking is enabled by any of:
 - `Anthropic-Beta` header containing `context-1m` (e.g., `context-1m-2025-01-01`)
 - `thinking.type` set to `"enabled"` or `"adaptive"` in the request
 
-The thinking budget is determined by:
+The reasoning effort sent to the backend is resolved as follows:
 
-1. `thinking.budget_tokens` if explicitly set
-2. Derived from `output_config.effort`: `max` = 160000, `xhigh` = 80000, `high` = 40000, `medium` = 10000, `low` = 4000
-3. Default: 10000 (medium)
+1. An explicit, recognized `output_config.effort` wins, validated/clamped to the model's allowed enum (`xhigh` on a 4-value model clamps to `max`; unrecognized strings are dropped).
+2. Otherwise, if reasoning is enabled (via `thinking.type`, the `[1m]` suffix, or the `context-1m` header) without an explicit effort, a default effort of `medium` is sent so the intent reaches the backend.
+3. Otherwise the field is omitted.
+
+Per-model allowed effort levels:
+
+- `claude-opus-4.8`, `claude-opus-4.7`: `low`, `medium`, `high`, `xhigh`, `max`
+- `claude-opus-4.6`, `claude-sonnet-4.6` (and their `-1m` variants): `low`, `medium`, `high`, `max` (no `xhigh`; clamps to `max`)
+- All other models omit `additionalModelRequestFields` entirely
+
+`thinking.budget_tokens` is accepted in the request but no longer affects behavior; reasoning depth is conveyed entirely through `effort`.
 
 ### Tool Search
 
