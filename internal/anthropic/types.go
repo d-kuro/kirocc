@@ -36,24 +36,6 @@ const (
 	ThinkingTypeAdaptive = "adaptive"
 )
 
-// Effort level constants (set via output_config.effort).
-const (
-	EffortMax    = "max"
-	EffortXHigh  = "xhigh"
-	EffortHigh   = "high"
-	EffortMedium = "medium"
-	EffortLow    = "low"
-)
-
-// Thinking budget tokens per reasoning effort level.
-const (
-	ThinkingBudgetMax    = 160000
-	ThinkingBudgetXHigh  = 80000
-	ThinkingBudgetHigh   = 40000
-	ThinkingBudgetMedium = 10000
-	ThinkingBudgetLow    = 4000
-)
-
 // IsThinkingEnabled reports whether extended thinking is enabled in the request.
 // Anthropic API supports type "enabled" and "adaptive".
 func (r *Request) IsThinkingEnabled() bool {

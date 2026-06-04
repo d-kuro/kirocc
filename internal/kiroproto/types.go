@@ -17,8 +17,21 @@ const (
 
 // Payload is the top-level request body for the Kiro API.
 type Payload struct {
-	ConversationState ConversationState `json:"conversationState"`
-	ProfileARN        string            `json:"profileArn,omitempty"`
+	ConversationState            ConversationState             `json:"conversationState"`
+	ProfileARN                   string                        `json:"profileArn,omitempty"`
+	AdditionalModelRequestFields *AdditionalModelRequestFields `json:"additionalModelRequestFields,omitempty"`
+}
+
+// AdditionalModelRequestFields carries model-specific request options. kiro-cli
+// 2.5.1 sends this at the request root (sibling of conversationState/profileArn)
+// and currently only populates output_config.effort.
+type AdditionalModelRequestFields struct {
+	OutputConfig *OutputConfig `json:"output_config,omitempty"`
+}
+
+// OutputConfig carries the reasoning effort level (low/medium/high/xhigh/max).
+type OutputConfig struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 // ConversationState holds the conversation context for the Kiro API.
@@ -45,10 +58,19 @@ type UserInputMessage struct {
 	CachePoint              *CachePoint              `json:"cachePoint,omitempty"`
 }
 
-// UserInputMessageContext holds tools and tool results.
+// UserInputMessageContext holds the environment state, tools, and tool results.
 type UserInputMessageContext struct {
+	EnvState    *EnvState    `json:"envState,omitempty"`
 	Tools       []ToolEntry  `json:"tools,omitempty"`
 	ToolResults []ToolResult `json:"toolResults,omitempty"`
+}
+
+// EnvState describes the client's environment. kiro-cli 2.5.1 sends this on the
+// current message's userInputMessageContext (never on history entries) so the
+// backend model knows the operating system and working directory.
+type EnvState struct {
+	OperatingSystem         string `json:"operatingSystem,omitempty"`
+	CurrentWorkingDirectory string `json:"currentWorkingDirectory,omitempty"`
 }
 
 // ToolEntry is a union type in the tools array: either a toolSpecification or a cachePoint.

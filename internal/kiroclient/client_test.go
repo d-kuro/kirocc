@@ -218,6 +218,96 @@ func TestHTTPClient_400_NoRetry(t *testing.T) {
 	}
 }
 
+// TestUserAgent_Documents251 pins the exact User-Agent and x-amz-user-agent
+// values emitted for kiro-cli 2.5.1, captured from real traffic
+// (/tmp/kiro-capture/20260603_161355, GAR seq 05/09). It guards against silent
+// version drift — the strings have no other compile-time guard.
+func TestUserAgent_Documents251(t *testing.T) {
+	const (
+		wantUA    = "aws-sdk-rust/1.3.15 ua/2.1 api/codewhispererstreaming/0.1.16551 os/macos lang/rust/1.92.0 md/appVersion-2.5.1 app/AmazonQ-For-CLI"
+		wantAmzUA = "aws-sdk-rust/1.3.15 ua/2.1 api/codewhispererstreaming/0.1.16551 os/macos lang/rust/1.92.0 m/F app/AmazonQ-For-CLI"
+	)
+	var gotUA, gotAmzUA string
+	srv := newTCP4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		gotAmzUA = r.Header.Get("x-amz-user-agent")
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(WithBaseURL(srv.URL))
+	payload := &kiroproto.Payload{ConversationState: kiroproto.ConversationState{AgentTaskType: "vibe", ChatTriggerType: "MANUAL", CurrentMessage: kiroproto.CurrentMessage{UserInputMessage: kiroproto.UserInputMessage{Content: "Hi"}}}}
+	resp, err := c.GenerateAssistantResponse(context.Background(), "tok", payload, "us-east-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+
+	if gotUA != wantUA {
+		t.Errorf("User-Agent =\n  %q\nwant\n  %q", gotUA, wantUA)
+	}
+	if gotAmzUA != wantAmzUA {
+		t.Errorf("x-amz-user-agent =\n  %q\nwant\n  %q", gotAmzUA, wantAmzUA)
+	}
+}
+
+// TestAmzSdkRequestHeader verifies the amz-sdk-request header reports the real
+// max retry count (max=3, matching kiro-cli 2.5.1) on the first attempt.
+func TestAmzSdkRequestHeader(t *testing.T) {
+	var got string
+	srv := newTCP4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("amz-sdk-request")
+		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(WithBaseURL(srv.URL))
+	payload := &kiroproto.Payload{ConversationState: kiroproto.ConversationState{AgentTaskType: "vibe", ChatTriggerType: "MANUAL", CurrentMessage: kiroproto.CurrentMessage{UserInputMessage: kiroproto.UserInputMessage{Content: "Hi"}}}}
+	resp, err := c.GenerateAssistantResponse(context.Background(), "tok", payload, "us-east-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+
+	if want := "attempt=1; max=3"; got != want {
+		t.Errorf("amz-sdk-request = %q, want %q", got, want)
+	}
+}
+
+// TestAmzSdkRequestHeader_ConsistentAcrossRetries verifies that the attempt
+// counter never exceeds the advertised max: when every attempt fails with a
+// retryable error, the total number of requests equals the header's max (3) and
+// the final attempt sends "attempt=3; max=3" — not "attempt=4; max=3".
+func TestAmzSdkRequestHeader_ConsistentAcrossRetries(t *testing.T) {
+	var headers []string
+	srv := newTCP4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers = append(headers, r.Header.Get("amz-sdk-request"))
+		w.WriteHeader(http.StatusTooManyRequests) // always retryable
+		_, _ = w.Write([]byte("rate limited"))
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(WithBaseURL(srv.URL))
+	c.httpClient.Timeout = 30 * time.Second
+	payload := &kiroproto.Payload{ConversationState: kiroproto.ConversationState{AgentTaskType: "vibe", ChatTriggerType: "MANUAL", CurrentMessage: kiroproto.CurrentMessage{UserInputMessage: kiroproto.UserInputMessage{Content: "Hi"}}}}
+	_, err := c.GenerateAssistantResponse(context.Background(), "tok", payload, "us-east-1")
+	if err == nil {
+		t.Fatal("expected error after exhausting retries")
+	}
+
+	want := []string{"attempt=1; max=3", "attempt=2; max=3", "attempt=3; max=3"}
+	if len(headers) != len(want) {
+		t.Fatalf("total attempts = %d (%v), want %d", len(headers), headers, len(want))
+	}
+	for i := range want {
+		if headers[i] != want[i] {
+			t.Errorf("attempt %d header = %q, want %q", i+1, headers[i], want[i])
+		}
+	}
+}
+
 func TestHTTPClient_EndpointURL(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -225,7 +315,7 @@ func TestHTTPClient_EndpointURL(t *testing.T) {
 		region  string
 		want    string
 	}{
-		{"region-based", "", "us-west-2", "https://q.us-west-2.amazonaws.com/"},
+		{"region-based", "", "us-west-2", "https://runtime.us-west-2.kiro.dev/"},
 		{"override", "http://localhost:8080", "us-west-2", "http://localhost:8080"},
 	}
 	for _, tt := range tests {

@@ -21,12 +21,26 @@ import (
 )
 
 const (
-	amzTarget      = "AmazonCodeWhispererStreamingService.GenerateAssistantResponse"
-	maxRetries     = 3
+	amzTarget = "AmazonCodeWhispererStreamingService.GenerateAssistantResponse"
+	// maxAttempts is the total number of request attempts (initial + retries).
+	// kiro-cli 2.5.1 advertises this verbatim in the amz-sdk-request header
+	// (attempt=N; max=3), so the loop count and the header stay consistent.
+	maxAttempts    = 3
 	baseRetryDelay = 1 * time.Second
+)
 
-	userAgentValue    = "aws-sdk-rust/1.3.14 ua/2.1 api/codewhispererstreaming/0.1.14474 os/macos lang/rust/1.92.0 md/appVersion-2.0.0 app/AmazonQ-For-CLI"
-	amzUserAgentValue = "aws-sdk-rust/1.3.14 ua/2.1 api/codewhispererstreaming/0.1.14474 os/macos lang/rust/1.92.0 m/F app/AmazonQ-For-CLI"
+// User-Agent version components, pinned to the kiro-cli release we emulate.
+// Bump these together when targeting a new kiro-cli version; the
+// TestUserAgent_Documents251 drift guard fails if the assembled strings change.
+const (
+	appVersion              = "2.5.1"
+	awsSDKRustVersion       = "1.3.15"
+	codewhispererAPIVersion = "0.1.16551"
+)
+
+var (
+	userAgentValue    = fmt.Sprintf("aws-sdk-rust/%s ua/2.1 api/codewhispererstreaming/%s os/macos lang/rust/1.92.0 md/appVersion-%s app/AmazonQ-For-CLI", awsSDKRustVersion, codewhispererAPIVersion, appVersion)
+	amzUserAgentValue = fmt.Sprintf("aws-sdk-rust/%s ua/2.1 api/codewhispererstreaming/%s os/macos lang/rust/1.92.0 m/F app/AmazonQ-For-CLI", awsSDKRustVersion, codewhispererAPIVersion)
 )
 
 // Client is the interface for calling the Kiro API.
@@ -140,7 +154,7 @@ func (c *HTTPClient) endpointURL(region string) string {
 	if c.baseURL != "" {
 		return c.baseURL
 	}
-	return fmt.Sprintf("https://q.%s.amazonaws.com/", region)
+	return fmt.Sprintf("https://runtime.%s.kiro.dev/", region)
 }
 
 // GenerateAssistantResponse sends a request to the Kiro API with retry logic.
@@ -176,7 +190,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 	invocationID := uuid.New().String()
 	traceID, short := logging.TraceIDs(ctx)
 
-	for attempt := 0; attempt <= maxRetries; attempt++ {
+	for attempt := range maxAttempts {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
 			return nil, fmt.Errorf("create request: %w", err)
@@ -190,7 +204,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 		req.Header.Set("x-amz-user-agent", amzUserAgentValue)
 		req.Header.Set("x-amzn-codewhisperer-optout", "false")
 		req.Header.Set("amz-sdk-invocation-id", invocationID)
-		req.Header.Set("amz-sdk-request", fmt.Sprintf("attempt=%d; max=%d", attempt+1, maxRetries+1))
+		req.Header.Set("amz-sdk-request", fmt.Sprintf("attempt=%d; max=%d", attempt+1, maxAttempts))
 
 		slog.DebugContext(ctx, "kiro request headers",
 			"trace_id", traceID,
@@ -200,10 +214,10 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			if attempt < maxRetries {
+			if attempt < maxAttempts-1 {
 				delay := backoffDelay(attempt)
 				slog.WarnContext(ctx, "kiro: request error, retrying",
-					"trace_id", short, "attempt", attempt+1, "max", maxRetries+1,
+					"trace_id", short, "attempt", attempt+1, "max", maxAttempts,
 					"delay", delay, "err", err)
 				if waitErr := retryWait(ctx, delay); waitErr != nil {
 					return nil, waitErr
@@ -234,11 +248,11 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 				exType := resolveAWSException(errBody, resp.Header)
 				// Retry transient AWS exceptions (throttling / internal / 5xx-equivalent)
 				// even though the HTTP status is 200.
-				if attempt < maxRetries && isRetryableAWSException(exType) {
+				if attempt < maxAttempts-1 && isRetryableAWSException(exType) {
 					delay := backoffDelay(attempt)
 					slog.WarnContext(ctx, "kiro: 200 with non-eventstream exception, retrying",
 						"trace_id", short, "content_type", ct, "exception", exType,
-						"attempt", attempt+1, "max", maxRetries+1,
+						"attempt", attempt+1, "max", maxAttempts,
 						"delay", delay, "body", errBody)
 					if waitErr := retryWait(ctx, delay); waitErr != nil {
 						return nil, waitErr
@@ -264,7 +278,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 
 		case resp.StatusCode == http.StatusForbidden:
 			_ = resp.Body.Close()
-			if attempt < maxRetries && c.tokenRefresher != nil {
+			if attempt < maxAttempts-1 && c.tokenRefresher != nil {
 				newToken, err := c.tokenRefresher(ctx)
 				if err != nil {
 					slog.WarnContext(ctx, "kiro: token refresh failed",
@@ -272,7 +286,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 				} else {
 					currentToken = newToken
 					slog.InfoContext(ctx, "kiro: 403 received, token refreshed",
-						"trace_id", short, "attempt", attempt+1, "max", maxRetries+1)
+						"trace_id", short, "attempt", attempt+1, "max", maxAttempts)
 					continue
 				}
 			}
@@ -282,11 +296,11 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 
 		case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
 			errBody := readLimitedBody(resp.Body, upstreamBodyLimit)
-			if attempt < maxRetries {
+			if attempt < maxAttempts-1 {
 				delay := backoffDelay(attempt)
 				slog.WarnContext(ctx, "kiro: upstream error, retrying",
 					"trace_id", short, "status", resp.StatusCode,
-					"attempt", attempt+1, "max", maxRetries+1,
+					"attempt", attempt+1, "max", maxAttempts,
 					"delay", delay, "body", errBody)
 				if waitErr := retryWait(ctx, delay); waitErr != nil {
 					return nil, waitErr

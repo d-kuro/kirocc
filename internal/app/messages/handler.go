@@ -55,7 +55,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 
 	s.logRequest(ctx, short, ccSessionID, kiroModel, contextWindowSize, req, thinking)
 
-	thinkingBudget := resolveThinkingBudget(ctx, req)
+	effort := resolveEffort(ctx, kiroModel, req, thinking)
 
 	// Tool search short-circuits to the orchestrator, which has its own retry loop.
 	if tsCtx := toolsearch.NewContext(req.Tools); tsCtx != nil {
@@ -67,7 +67,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 			"deferred_tools", len(tsCtx.DeferredTools),
 			"active_tools", len(tsCtx.ActiveTools),
 		)
-		s.runToolSearch(ctx, w, req, creds, tsCtx, kiroModel, anthropicModel, contextWindowSize, thinking, thinkingBudget, ccSessionID, short)
+		s.runToolSearch(ctx, w, req, creds, tsCtx, kiroModel, anthropicModel, contextWindowSize, thinking, effort, ccSessionID, short)
 		return
 	}
 
@@ -75,8 +75,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		ProfileARN:     creds.ProfileARN,
 		ModelID:        kiroModel,
 		ConversationID: ccSessionID,
-		Thinking:       thinking,
-		ThinkingBudget: thinkingBudget,
+		Effort:         effort,
 	})
 	if err != nil {
 		slog.WarnContext(ctx, "payload build error", "trace_id", short, "err", err)
@@ -117,7 +116,7 @@ func (s *Service) logRequest(ctx context.Context, short, ccSessionID, kiroModel 
 }
 
 // runToolSearch wires up the orchestrator and retries once on empty-visible end_turn.
-func (s *Service) runToolSearch(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, creds *auth.Credentials, tsCtx *toolsearch.Context, kiroModel, responseModel string, contextWindowSize int, thinking bool, thinkingBudget int, ccSessionID, short string) {
+func (s *Service) runToolSearch(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, creds *auth.Credentials, tsCtx *toolsearch.Context, kiroModel, responseModel string, contextWindowSize int, thinking bool, effort string, ccSessionID, short string) {
 	orch := &toolSearchOrchestrator{
 		service: s,
 		tsCtx:   tsCtx,
@@ -127,8 +126,7 @@ func (s *Service) runToolSearch(ctx context.Context, w http.ResponseWriter, req 
 			ProfileARN:     creds.ProfileARN,
 			ModelID:        kiroModel,
 			ConversationID: ccSessionID,
-			Thinking:       thinking,
-			ThinkingBudget: thinkingBudget,
+			Effort:         effort,
 			ToolSearchCtx:  tsCtx,
 		},
 		contextWindowSize: contextWindowSize,

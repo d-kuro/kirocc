@@ -27,16 +27,13 @@ func TestParseStream_SingleEvents(t *testing.T) {
 		{
 			name:      "assistantResponseEvent",
 			eventType: "assistantResponseEvent",
-			payload:   map[string]string{"content": "Hello, world!", "modelId": "claude-opus-4.6-1m"},
+			payload:   map[string]string{"content": "Hello, world!"},
 			check: func(t *testing.T, e Event) {
 				if e.Type != "assistantResponseEvent" {
 					t.Errorf("Type = %q", e.Type)
 				}
 				if e.Content != "Hello, world!" {
 					t.Errorf("Content = %q", e.Content)
-				}
-				if e.ModelID != "claude-opus-4.6-1m" {
-					t.Errorf("ModelID = %q, want %q", e.ModelID, "claude-opus-4.6-1m")
 				}
 			},
 		},

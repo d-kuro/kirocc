@@ -82,7 +82,7 @@ func extractRegionFromARN(arn string) string {
 
 // resolveRegion picks the first non-empty region in priority order, falling back
 // to "us-east-1" when none is set. Intended for Credentials.Region (the API
-// region embedded in q.<region>.amazonaws.com). Do NOT use for SSORegion: the
+// region embedded in runtime.<region>.kiro.dev). Do NOT use for SSORegion: the
 // token refresh path relies on an empty SSORegion to fail fast when IDC is
 // misconfigured, and the fallback would mask that condition.
 //
