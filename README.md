@@ -213,7 +213,7 @@ flowchart TB
 
 ### Extended Thinking
 
-kiro-cli 2.5.1 expresses reasoning depth natively through `output_config.effort`. kirocc forwards it as `additionalModelRequestFields.output_config.effort` at the request root (sibling of `conversationState`):
+kiro-cli 2.10.0 expresses reasoning depth natively through `output_config.effort`. kirocc forwards it as `additionalModelRequestFields.output_config.effort` at the request root (sibling of `conversationState`):
 
 ```json
 {
@@ -230,6 +230,8 @@ Thinking is enabled by any of:
 - `Anthropic-Beta` header containing `context-1m` (e.g., `context-1m-2025-01-01`)
 - `thinking.type` set to `"enabled"` or `"adaptive"` in the request
 
+Exception: the `[1m]` suffix on an **always-1M** model (`claude-opus-4-8[1m]` / `claude-opus-4-7[1m]` / `claude-opus-4-6[1m]` / `claude-sonnet-5[1m]`) is a first-class alias that only advertises the 1M context window — it does **not** enable thinking (see [Model mappings](#model-mappings)). Thinking on those models is still opt-in via the `context-1m` header or the `thinking` field.
+
 The reasoning effort sent to the backend is resolved as follows:
 
 1. An explicit, recognized `output_config.effort` wins, validated/clamped to the model's allowed enum (`xhigh` on a 4-value model clamps to `max`; unrecognized strings are dropped).
@@ -238,7 +240,7 @@ The reasoning effort sent to the backend is resolved as follows:
 
 Per-model allowed effort levels:
 
-- `claude-opus-4.8`, `claude-opus-4.7`: `low`, `medium`, `high`, `xhigh`, `max`
+- `claude-opus-4.8`, `claude-opus-4.7`, `claude-sonnet-5`: `low`, `medium`, `high`, `xhigh`, `max`
 - `claude-opus-4.6`, `claude-sonnet-4.6` (and their `-1m` variants): `low`, `medium`, `high`, `max` (no `xhigh`; clamps to `max`)
 - All other models omit `additionalModelRequestFields` entirely
 
@@ -267,6 +269,8 @@ Supported query forms:
 
 | Input model             | Kiro model             | Context window |
 | ----------------------- | ---------------------- | -------------- |
+| `claude-sonnet-5`       | `claude-sonnet-5`      | 1M             |
+| `claude-sonnet-5[1m]`   | `claude-sonnet-5`      | 1M             |
 | `claude-sonnet-4-6`     | `claude-sonnet-4.6`    | 200k           |
 | `claude-sonnet-4-6[1m]` | `claude-sonnet-4.6-1m` | 1M             |
 | `claude-sonnet-4.5`     | `claude-sonnet-4.5`    | 200k           |
@@ -280,7 +284,7 @@ Supported query forms:
 | `claude-opus-4.5`       | `claude-opus-4.5`      | 200k           |
 | `claude-haiku-4.5`      | `claude-haiku-4.5`     | 200k           |
 
-Opus 4.6, 4.7, and 4.8 always use 1M context (no 200k SKU exists upstream). The explicit `[1m]`-suffixed aliases (`claude-opus-4-8[1m]` / `claude-opus-4-7[1m]` / `claude-opus-4-6[1m]`) are first-class entries that preserve the suffix verbatim in the response `model` field — this matches Claude Code's default Max-plan state (`lG()` emits `claude-opus-4-8[1m]`) and keeps its `mR()` 1M-context check happy without spuriously enabling extended thinking. Thinking is still opt-in via Sonnet `[1m]` suffix, `Anthropic-Beta: context-1m` header, or `thinking` field.
+Opus 4.6, 4.7, 4.8, and Sonnet 5 always use 1M context (no 200k SKU exists upstream). Unlike Sonnet 4.6, `claude-sonnet-5` has no separate `-1m` SKU: the single `claude-sonnet-5` SKU is always 1M. The explicit `[1m]`-suffixed aliases (`claude-opus-4-8[1m]` / `claude-opus-4-7[1m]` / `claude-opus-4-6[1m]` / `claude-sonnet-5[1m]`) are first-class entries that preserve the suffix verbatim in the response `model` field — this matches Claude Code's default Max-plan state (`lG()` emits `claude-opus-4-8[1m]`) and keeps its `mR()` 1M-context check happy without spuriously enabling extended thinking. Thinking is still opt-in via Sonnet `[1m]` suffix, `Anthropic-Beta: context-1m` header, or `thinking` field.
 
 Unmatched `claude-*` models are passed through as-is. Non-claude models fall back to `claude-sonnet-4.6`.
 

@@ -24,12 +24,14 @@ var effortRank = map[string]int{
 
 // effortEnums maps each effort-capable Kiro model to its allowed effort levels,
 // matching the per-model additionalModelRequestFieldsSchema advertised by
-// ListAvailableModels (kiro-cli 2.5.1). Models absent from this table do not
+// ListAvailableModels (kiro-cli 2.10.0). Models absent from this table do not
 // support effort and must omit additionalModelRequestFields entirely.
 var effortEnums = map[string][]string{
 	// 5-value enum (includes xhigh); 128000 max-output models.
 	"claude-opus-4.8": {EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
 	"claude-opus-4.7": {EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
+	// 5-value enum (includes xhigh); 64000 max-output model.
+	"claude-sonnet-5": {EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
 	// 4-value enum (no xhigh); 64000 max-output models.
 	"claude-opus-4.6":      {EffortLow, EffortMedium, EffortHigh, EffortMax},
 	"claude-sonnet-4.6":    {EffortLow, EffortMedium, EffortHigh, EffortMax},

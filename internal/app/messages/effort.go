@@ -21,7 +21,7 @@ func formatContextWindow(size int) string {
 
 // defaultThinkingEffort is the native effort level sent when a request enables
 // reasoning (thinking.type, the [1m] suffix, or the context-1m header) without
-// an explicit output_config.effort. kiro-cli 2.5.1 expresses all reasoning depth
+// an explicit output_config.effort. kiro-cli 2.10.0 expresses all reasoning depth
 // through effort, so this carries the "thinking on" intent to the backend. It
 // matches the medium tier the old thinking-XML path defaulted to.
 const defaultThinkingEffort = models.EffortMedium

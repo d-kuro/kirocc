@@ -108,7 +108,7 @@ func TestE2E_EffortNative_NoXMLInjection(t *testing.T) {
 // TestE2E_ThinkingWithoutEffort_SendsDefaultEffort verifies that a request which
 // enables reasoning via thinking.type but specifies no output_config.effort
 // still forwards a native effort level, so the "thinking on" intent reaches the
-// backend (kiro-cli 2.5.1 expresses all reasoning depth through effort).
+// backend (kiro-cli 2.10.0 expresses all reasoning depth through effort).
 func TestE2E_ThinkingWithoutEffort_SendsDefaultEffort(t *testing.T) {
 	p1 := mustJSON(map[string]string{"content": "ok"})
 	client := &capturingClient{events: []any{"assistantResponseEvent", p1}}

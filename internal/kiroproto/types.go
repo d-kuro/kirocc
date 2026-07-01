@@ -23,7 +23,7 @@ type Payload struct {
 }
 
 // AdditionalModelRequestFields carries model-specific request options. kiro-cli
-// 2.5.1 sends this at the request root (sibling of conversationState/profileArn)
+// 2.10.0 sends this at the request root (sibling of conversationState/profileArn)
 // and currently only populates output_config.effort.
 type AdditionalModelRequestFields struct {
 	OutputConfig *OutputConfig `json:"output_config,omitempty"`
@@ -65,7 +65,7 @@ type UserInputMessageContext struct {
 	ToolResults []ToolResult `json:"toolResults,omitempty"`
 }
 
-// EnvState describes the client's environment. kiro-cli 2.5.1 sends this on the
+// EnvState describes the client's environment. kiro-cli 2.10.0 sends this on the
 // current message's userInputMessageContext (never on history entries) so the
 // backend model knows the operating system and working directory.
 type EnvState struct {
