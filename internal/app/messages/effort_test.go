@@ -20,6 +20,9 @@ func TestResolveEffort(t *testing.T) {
 		{"explicit max on opus-4.8", "claude-opus-4.8", "max", false, "max"},
 		{"explicit xhigh on opus-4.8", "claude-opus-4.8", "xhigh", true, "xhigh"},
 		{"explicit xhigh clamps on sonnet-4.6", "claude-sonnet-4.6", "xhigh", false, "max"},
+		// sonnet-5 is the first Sonnet with a 5-value enum: xhigh is honored, not clamped.
+		{"explicit xhigh honored on sonnet-5", "claude-sonnet-5", "xhigh", false, "xhigh"},
+		{"explicit high on sonnet-5", "claude-sonnet-5", "high", false, "high"},
 
 		// No effort + no thinking: nothing sent.
 		{"no effort no thinking", "claude-opus-4.8", "", false, ""},

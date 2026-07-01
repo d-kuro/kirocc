@@ -23,19 +23,20 @@ import (
 const (
 	amzTarget = "AmazonCodeWhispererStreamingService.GenerateAssistantResponse"
 	// maxAttempts is the total number of request attempts (initial + retries).
-	// kiro-cli 2.5.1 advertises this verbatim in the amz-sdk-request header
-	// (attempt=N; max=3), so the loop count and the header stay consistent.
+	// kiro-cli advertises this verbatim in the amz-sdk-request header
+	// (attempt=N; max=3, still observed in the 2.10.0 capture), so the loop
+	// count and the header stay consistent.
 	maxAttempts    = 3
 	baseRetryDelay = 1 * time.Second
 )
 
 // User-Agent version components, pinned to the kiro-cli release we emulate.
 // Bump these together when targeting a new kiro-cli version; the
-// TestUserAgent_Documents251 drift guard fails if the assembled strings change.
+// TestUserAgent_Documents2100 drift guard fails if the assembled strings change.
 const (
-	appVersion              = "2.5.1"
+	appVersion              = "2.10.0"
 	awsSDKRustVersion       = "1.3.15"
-	codewhispererAPIVersion = "0.1.16551"
+	codewhispererAPIVersion = "0.1.17593"
 )
 
 var (

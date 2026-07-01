@@ -218,14 +218,14 @@ func TestHTTPClient_400_NoRetry(t *testing.T) {
 	}
 }
 
-// TestUserAgent_Documents251 pins the exact User-Agent and x-amz-user-agent
-// values emitted for kiro-cli 2.5.1, captured from real traffic
-// (/tmp/kiro-capture/20260603_161355, GAR seq 05/09). It guards against silent
-// version drift — the strings have no other compile-time guard.
-func TestUserAgent_Documents251(t *testing.T) {
+// TestUserAgent_Documents2100 pins the exact User-Agent and x-amz-user-agent
+// values emitted for kiro-cli 2.10.0, captured from real traffic
+// (_docs/capture/v2.10.0/, GAR seq 08). It guards against silent version drift —
+// the strings have no other compile-time guard.
+func TestUserAgent_Documents2100(t *testing.T) {
 	const (
-		wantUA    = "aws-sdk-rust/1.3.15 ua/2.1 api/codewhispererstreaming/0.1.16551 os/macos lang/rust/1.92.0 md/appVersion-2.5.1 app/AmazonQ-For-CLI"
-		wantAmzUA = "aws-sdk-rust/1.3.15 ua/2.1 api/codewhispererstreaming/0.1.16551 os/macos lang/rust/1.92.0 m/F app/AmazonQ-For-CLI"
+		wantUA    = "aws-sdk-rust/1.3.15 ua/2.1 api/codewhispererstreaming/0.1.17593 os/macos lang/rust/1.92.0 md/appVersion-2.10.0 app/AmazonQ-For-CLI"
+		wantAmzUA = "aws-sdk-rust/1.3.15 ua/2.1 api/codewhispererstreaming/0.1.17593 os/macos lang/rust/1.92.0 m/F app/AmazonQ-For-CLI"
 	)
 	var gotUA, gotAmzUA string
 	srv := newTCP4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -253,7 +253,7 @@ func TestUserAgent_Documents251(t *testing.T) {
 }
 
 // TestAmzSdkRequestHeader verifies the amz-sdk-request header reports the real
-// max retry count (max=3, matching kiro-cli 2.5.1) on the first attempt.
+// max retry count (max=3, matching kiro-cli 2.10.0) on the first attempt.
 func TestAmzSdkRequestHeader(t *testing.T) {
 	var got string
 	srv := newTCP4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

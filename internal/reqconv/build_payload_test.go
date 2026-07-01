@@ -318,7 +318,7 @@ func TestBuildPayload_EnvStateOmittedWhenNil(t *testing.T) {
 
 // TestBuildPayload_WireFieldOrder pins the JSON field order: additionalModelRequestFields
 // after profileArn at the root, and envState before tools within
-// userInputMessageContext — matching the captured kiro-cli 2.5.1 wire format.
+// userInputMessageContext — matching the captured kiro-cli 2.10.0 wire format.
 func TestBuildPayload_WireFieldOrder(t *testing.T) {
 	req := &anthropic.Request{
 		Model:  "claude-opus-4-8",

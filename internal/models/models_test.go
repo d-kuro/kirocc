@@ -102,6 +102,29 @@ func TestResolve(t *testing.T) {
 			wantAnthropicModel: "claude-opus-4-6[1m]",
 		},
 		{
+			name:               "claude-sonnet-5 always resolves to 1m without thinking",
+			model:              "claude-sonnet-5",
+			wantKiroModel:      "claude-sonnet-5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-5[1m]",
+		},
+		{
+			name:               "claude-sonnet-5[1m] exact-match preserves suffix without thinking",
+			model:              "claude-sonnet-5[1m]",
+			wantKiroModel:      "claude-sonnet-5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-5[1m]",
+		},
+		{
+			name:               "claude-sonnet-5 with context1M enables thinking",
+			model:              "claude-sonnet-5",
+			context1M:          true,
+			wantKiroModel:      "claude-sonnet-5",
+			wantThinking:       true,
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-5[1m]",
+		},
+		{
 			name:               "claude-sonnet-4-6",
 			model:              "claude-sonnet-4-6",
 			wantKiroModel:      "claude-sonnet-4.6",
@@ -267,6 +290,10 @@ func TestListModels(t *testing.T) {
 		{
 			name:       "default models are deduplicated and contain DefaultModel",
 			checkModel: DefaultModel,
+		},
+		{
+			name:       "claude-sonnet-5 is listed exactly once (both alias rows dedupe to one Kiro value)",
+			checkModel: "claude-sonnet-5",
 		},
 		{
 			name:        "env override model included",
