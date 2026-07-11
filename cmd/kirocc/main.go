@@ -131,6 +131,13 @@ func buildKiroClient(authMgr *auth.AuthManager, cfg config.Config) kiroclient.Cl
 			return creds.AccessToken, nil
 		}),
 	}
+	if cfg.BaseURL != "" {
+		clientOpts = append(clientOpts, kiroclient.WithBaseURL(cfg.BaseURL))
+	}
+	if cfg.Insecure {
+		clientOpts = append(clientOpts, kiroclient.WithInsecure())
+		slog.Warn("TLS certificate verification disabled for upstream connections")
+	}
 	if cfg.OTel {
 		clientOpts = append(clientOpts, kiroclient.WithOTel(cfg.OTelBodyLimit))
 	}
