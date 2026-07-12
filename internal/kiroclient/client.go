@@ -3,6 +3,7 @@ package kiroclient
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -71,6 +72,7 @@ const defaultBodyReadIdleTimeout = 180 * time.Second
 type HTTPClient struct {
 	httpClient     *http.Client
 	baseURL        string // override for tests; empty = use region-based URL
+	insecure       bool   // skip TLS certificate verification
 	otel           bool
 	otelBodyLimit  int
 	tokenRefresher TokenRefresher
@@ -84,6 +86,11 @@ type HTTPClientOption func(*HTTPClient)
 // WithBaseURL sets a custom base URL (for testing).
 func WithBaseURL(url string) HTTPClientOption {
 	return func(c *HTTPClient) { c.baseURL = url }
+}
+
+// WithInsecure disables TLS certificate verification for upstream connections.
+func WithInsecure() HTTPClientOption {
+	return func(c *HTTPClient) { c.insecure = true }
 }
 
 // WithTokenRefresher sets the token refresh callback for 403 retry.
@@ -126,6 +133,10 @@ func NewHTTPClient(opts ...HTTPClientOption) *HTTPClient {
 	c := &HTTPClient{}
 	for _, opt := range opts {
 		opt(c)
+	}
+
+	if c.insecure {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // user-opted-in via KIROCC_INSECURE
 	}
 
 	var rt http.RoundTripper = transport

@@ -39,6 +39,13 @@ var modelMapOrdered = []Mapping{
 	{Anthropic: "claude-opus-4-6", Kiro: "claude-opus-4.6", Kiro1M: "claude-opus-4.6"},
 	{Anthropic: "claude-opus-4.5", Kiro: "claude-opus-4.5"},
 	{Anthropic: "claude-haiku-4.5", Kiro: "claude-haiku-4.5"},
+	// Non-Claude models available on Kiro platform
+	{Anthropic: "deepseek-3.2", Kiro: "deepseek-3.2"},
+	{Anthropic: "minimax-m2.5", Kiro: "minimax-m2.5"},
+	{Anthropic: "minimax-m2.1", Kiro: "minimax-m2.1"},
+	{Anthropic: "glm-5", Kiro: "glm-5"},
+	{Anthropic: "qwen3-coder-next", Kiro: "qwen3-coder-next"},
+	{Anthropic: "claude-sonnet-4", Kiro: "claude-sonnet-4"},
 }
 
 const DefaultModel = "claude-sonnet-4.6"
@@ -158,17 +165,10 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 	}
 
 	if !matched {
-		if strings.HasPrefix(model, "claude-") {
-			kiroModel = model
-			anthropicModel = model
-		} else {
-			slog.Warn("models.Resolve: non-claude model, falling back to default",
-				"requested_model", model,
-				"kiro_model", DefaultModel,
-			)
-			kiroModel = DefaultModel
-			anthropicModel = DefaultAnthropicModel
-		}
+		// Pass unrecognized models through directly — they may be valid Kiro models
+		// not yet in the mapping table (e.g. non-Claude models).
+		kiroModel = model
+		anthropicModel = model
 	} else {
 		anthropicModel = matchedAnthropic
 	}

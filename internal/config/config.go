@@ -19,6 +19,8 @@ type Config struct {
 	Host          string
 	DBPath        string
 	APIKey        string
+	BaseURL       string // override Kiro runtime endpoint (e.g. https://runtime.us-east-1.kiro.dev/)
+	Insecure      bool   // skip TLS certificate verification for upstream
 	Debug         bool
 	OTel          bool
 	OTelBodyLimit int
@@ -49,6 +51,10 @@ func ApplyEnvOverrides(cfg *Config) error {
 	applyString("KIROCC_DB_PATH", &cfg.DBPath)
 	applyString("KIROCC_API_KEY", &cfg.APIKey)
 	applyString("KIROCC_HOST", &cfg.Host)
+	applyString("KIROCC_BASE_URL", &cfg.BaseURL)
+	if err := applyBool("KIROCC_INSECURE", &cfg.Insecure); err != nil {
+		return err
+	}
 	if err := applyInt("KIROCC_PORT", &cfg.Port); err != nil {
 		return err
 	}
