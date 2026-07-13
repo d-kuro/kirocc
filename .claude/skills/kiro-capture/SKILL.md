@@ -161,19 +161,27 @@ For each request/response pair, extract:
    - `AmazonCodeWhispererService.ListAvailableModels` (JSON)
    - `ToolkitTelemetry.ClientTelemetryMetrics` (JSON)
    - `AmazonCodeWhispererService.GetProfile` (JSON)
-   - `AmazonCodeWhispererService.GetUsageLimits` (JSON, **403 is expected/normal**)
+   - `AmazonCodeWhispererService.GetUsageLimits` (JSON, **403 is expected/normal**; may be absent in a session)
    - `AmazonCodeWhispererService.SendTelemetryEvent` (JSON)
-   - If no `x-amz-target`, infer from URL path
+   - `AWSCognitoIdentityService.GetCredentialsForIdentity` (JSON; cognito-identity host — returns temporary AWS creds used to SigV4-sign the telemetry calls)
+   - If no `x-amz-target`, infer from URL path/host:
+     - `oidc.*.amazonaws.com/token` → `SSOOIDC.CreateToken` (JSON; `grantType: refresh_token` rotates the Bearer token mid-session)
+     - `client-telemetry.*.amazonaws.com/metrics` → `ToolkitTelemetry.ClientTelemetryMetrics`
 3. **Request URL**
 4. **Request headers** — all headers, but redact:
-   - `authorization` header value → `[REDACTED]`
+   - `authorization` header value → `[REDACTED]` (covers both `Bearer <token>` and `AWS4-HMAC-SHA256 ... Signature=...`)
    - `x-amz-security-token` header value → `[REDACTED]`
-5. **Request body** — extract JSON as-is
+5. **Request body** — extract JSON as-is, but redact secret **values** in these bodies:
+   - `CreateToken` request: `refreshToken`, `clientSecret` → `[REDACTED]`
 6. **Response status** — from `<< STATUS SIZE` line
 7. **Response headers**
 8. **Response body**:
-   - JSON → extract as-is
+   - JSON → extract as-is, but redact secret **values**:
+     - `GetCredentialsForIdentity` response: `AccessKeyId`, `SecretKey`, `SessionToken` → `[REDACTED]`
+     - `CreateToken` response: `accessToken`, `refreshToken` → `[REDACTED]`
    - EventStream (`application/vnd.amazon.eventstream`) → apply EventStream parsing below
+
+**Redaction rule:** secret values may only ever appear in `raw.log` (the mitmdump input). Every generated `.md` must contain `[REDACTED]` in their place. After generating files, verify no secret fragment (AWS `ASIA...` access key IDs, `Bearer aoa...`/`aor...` tokens, `AWS4-HMAC ... Signature=<hex>`, Cognito `IQoJ...` session tokens) leaks into any `.md` — including `report.md` prose.
 
 ### EventStream response parsing
 
@@ -184,11 +192,17 @@ Parsing steps:
 1. Identify event boundaries by `:event-type` markers
 2. Extract JSON objects (`{...}`) from each event segment
 3. Classify events:
+   - `initial-response` — stream preamble (`{"conversationId":""}`)
+   - `reasoningContentEvent` — native reasoning/thinking stream: `text` deltas followed by a final `signature` field. Concatenate the `text` deltas; note the `signature` exists but show it as `[present]` (do not dump the full value)
    - `assistantResponseEvent` — assistant response text (delta `content` field)
    - `toolUseEvent` — tool call (`name`, `toolUseId`, `input` fields)
+   - `metadataEvent` — turn end (`stopReason`, e.g. `END_TURN`)
    - `contextUsageEvent` — context usage (`contextUsagePercentage` field)
+   - `meteringEvent` — credit consumption (`{"unit":"credit","usage":...}`)
 4. Merge events sharing the same `toolUseId` to reconstruct complete tool calls
-5. Concatenate `assistantResponseEvent` `content` fields to reconstruct full response text
+5. Concatenate `assistantResponseEvent` `content` fields to reconstruct full response text; concatenate `reasoningContentEvent` `text` fields to reconstruct the reasoning trace
+
+> Note: `reasoningContentEvent` and `meteringEvent` are emitted by kiro-cli 2.10.0. Reasoning is now **native** (a `reasoningContentEvent` stream), not a `thinking` tool in the tools array.
 
 ### Step 10 — Generate individual API call files
 
@@ -249,11 +263,21 @@ Content-Type: `application/vnd.amazon.eventstream`
 
 **Events:**
 
-| #   | Event Type             | Summary                       |
-| --- | ---------------------- | ----------------------------- |
-| 1   | assistantResponseEvent | {first 80 chars}              |
-| 2   | toolUseEvent           | {tool name}: {first 80 chars} |
-| 3   | contextUsageEvent      | {percentage}%                 |
+| #   | Event Type             | Summary                          |
+| --- | ---------------------- | -------------------------------- |
+| 1   | initial-response       | conversationId ""                |
+| 2   | reasoningContentEvent  | {text delta / signature present} |
+| 3   | assistantResponseEvent | {first 80 chars}                 |
+| 4   | toolUseEvent           | {tool name}: {first 80 chars}    |
+| 5   | metadataEvent          | stopReason {value}               |
+| 6   | contextUsageEvent      | {percentage}%                    |
+| 7   | meteringEvent          | {usage} credits                  |
+
+**Full reasoning text:** (if any reasoningContentEvent)
+
+\`\`\`
+{concatenated reasoning text}
+\`\`\`
 
 **Full assistant response:**
 
@@ -261,11 +285,13 @@ Content-Type: `application/vnd.amazon.eventstream`
 {concatenated full text}
 \`\`\`
 
-**Tool calls:**
+**Tool calls:** (if any toolUseEvent)
 
 \`\`\`json
 [{reconstructed tool call objects}]
 \`\`\`
+
+**Metering:** {unit}, usage {value}
 ```
 
 ### Step 11 — Generate analysis report
@@ -304,11 +330,16 @@ Template:
 | CodeWhispererStreamingService | {n}   | GenerateAssistantResponse                                           |
 | CodeWhispererService          | {n}   | GetProfile, ListAvailableModels, GetUsageLimits, SendTelemetryEvent |
 | ToolkitTelemetry              | {n}   | ClientTelemetryMetrics                                              |
+| AWSCognitoIdentityService     | {n}   | GetCredentialsForIdentity                                           |
+| SSOOIDC                       | {n}   | CreateToken                                                         |
+
+(Omit categories with count 0.)
 
 ## Authentication
 
-1. **Bearer Token** (`authorization: Bearer <token>`): CodeWhisperer API
+1. **Bearer Token** (`authorization: Bearer <token>`): CodeWhisperer / kiro.dev API
 2. **AWS Signature V4** (`authorization: AWS4-HMAC-SHA256 ...`): Telemetry API
+3. **Cognito + OIDC**: `GetCredentialsForIdentity` yields the temporary AWS creds that SigV4-sign the telemetry calls; `CreateToken` (`grantType: refresh_token`) refreshes the Bearer token mid-session (note if/when the token rotates)
 
 ## Conversation Flow
 
@@ -341,7 +372,7 @@ Group requests by conversationId and agentContinuationId. Render as ASCII tree:
 ## Model Info
 
 - Model ID: {modelId}
-- Thinking: {enabled/disabled — check if tools array contains thinking tool}
+- Reasoning/thinking: {active/inactive — active if the response has a `reasoningContentEvent` stream. kiro-cli 2.10.0 uses native reasoning, so there is no `thinking` tool in the tools array}
 - Tool count: {length of tools array}
 
 ## Tool Usage Patterns
@@ -349,6 +380,18 @@ Group requests by conversationId and agentContinuationId. Render as ASCII tree:
 | Tool name                     | Invocation count |
 | ----------------------------- | ---------------- |
 | {tool name from toolUseEvent} | {count}          |
+
+(If no toolUseEvent occurred, report `(none) | 0` and note the turns were plain text.)
+
+## Notable Findings
+
+Bullet list of anything noteworthy vs. prior captures, e.g.:
+
+- New event types or APIs observed (e.g. `reasoningContentEvent`, `meteringEvent`)
+- Bearer token refresh / rotation via OIDC `CreateToken`
+- Model-catalog specifics from `ListAvailableModels` (rateMultiplier, maxOutputTokens, context window, thinking.type enum)
+- APIs that were expected but absent (e.g. `GetUsageLimits`)
+- Metering / credit usage per turn
 ```
 
 ### Step 12 — Update state.json
