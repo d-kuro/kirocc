@@ -317,7 +317,7 @@ Thinking is enabled by either of:
 
 An `Anthropic-Beta` header containing `context-1m` (e.g., `context-1m-2025-08-07`) is a pure context-window signal, matching Anthropic's long-context beta semantics: it routes the request to the model's 1M SKU but does **not** enable thinking. Claude Code sends this header automatically whenever the session model carries `[1m]`, so coupling it to thinking would force thinking on for every 1M session.
 
-Exception: the `[1m]` suffix on an **always-1M** model (`claude-opus-5[1m]` / `claude-opus-4-8[1m]` / `claude-opus-4-7[1m]` / `claude-opus-4-6[1m]` / `claude-sonnet-5[1m]`) is a first-class alias that only advertises the 1M context window — it does **not** enable thinking either (see [Model mappings](#model-mappings)). Thinking on those models is opt-in via the `thinking` field.
+Exception: the `[1m]` suffix on an **always-1M** model (`claude-opus-5[1m]` / `claude-opus-4-8[1m]` / `claude-opus-4-7[1m]` / `claude-opus-4-6[1m]` / `claude-sonnet-5[1m]` / `claude-fable-5-1[1m]`) is a first-class alias that only advertises the 1M context window — it does **not** enable thinking either (see [Model mappings](#model-mappings)). Thinking on those models is opt-in via the `thinking` field.
 
 The suffix is matched case-insensitively because Claude Code may emit `[1M]`
 from internal call paths. Responses always use the canonical lowercase `[1m]`.
@@ -330,7 +330,7 @@ The reasoning effort sent to the backend is resolved as follows:
 
 Per-model allowed effort levels:
 
-- `claude-opus-5`, `claude-opus-4.8`, `claude-opus-4.7`, `claude-sonnet-5`: `low`, `medium`, `high`, `xhigh`, `max`
+- `claude-opus-5`, `claude-opus-4.8`, `claude-opus-4.7`, `claude-sonnet-5`, `claude-fable-5.1`: `low`, `medium`, `high`, `xhigh`, `max`
 - `claude-opus-4.6`, `claude-sonnet-4.6` (and their `-1m` variants): `low`, `medium`, `high`, `max` (no `xhigh`; clamps to `max`)
 - Models not listed here fall back to the enum advertised by [model discovery](#automatic-model-discovery), if any
 - All other models omit `additionalModelRequestFields` entirely
@@ -409,6 +409,8 @@ Supported query forms:
 | `claude-opus-5[1m]`     | `claude-opus-5`        | 1M             |
 | `claude-sonnet-5`       | `claude-sonnet-5`      | 1M             |
 | `claude-sonnet-5[1m]`   | `claude-sonnet-5`      | 1M             |
+| `claude-fable-5-1`      | `claude-fable-5.1`     | 1M             |
+| `claude-fable-5-1[1m]`  | `claude-fable-5.1`     | 1M             |
 | `claude-sonnet-4-6`     | `claude-sonnet-4.6`    | 200k           |
 | `claude-sonnet-4-6[1m]` | `claude-sonnet-4.6-1m` | 1M             |
 | `claude-sonnet-4.5`     | `claude-sonnet-4.5`    | 200k           |
@@ -428,7 +430,7 @@ Supported query forms:
 | `claude-gpt-5.6-terra`  | `gpt-5.6-terra`        | 272k           |
 | `claude-gpt-5.6-luna`   | `gpt-5.6-luna`         | 272k           |
 
-Opus 5, Opus 4.6, 4.7, 4.8, and Sonnet 5 always use 1M context (no 200k SKU exists upstream). Unlike Sonnet 4.6, `claude-opus-5` and `claude-sonnet-5` have no separate `-1m` SKU: each single SKU is always 1M. The explicit `[1m]`-suffixed aliases (`claude-opus-5[1m]` / `claude-opus-4-8[1m]` / `claude-opus-4-7[1m]` / `claude-opus-4-6[1m]` / `claude-sonnet-5[1m]`) are first-class entries that preserve the suffix verbatim in the response `model` field and do **not** enable extended thinking. On these always-1M models, thinking is opt-in via the `thinking` field; the `[1m]` suffix remains a thinking opt-in for models without a first-class always-1M alias.
+Opus 5, Opus 4.6, 4.7, 4.8, Sonnet 5, and Fable 5.1 always use 1M context (no 200k SKU exists upstream). Unlike Sonnet 4.6, `claude-opus-5`, `claude-sonnet-5`, and `claude-fable-5.1` have no separate `-1m` SKU: each single SKU is always 1M. The explicit `[1m]`-suffixed aliases (`claude-opus-5[1m]` / `claude-opus-4-8[1m]` / `claude-opus-4-7[1m]` / `claude-opus-4-6[1m]` / `claude-sonnet-5[1m]` / `claude-fable-5-1[1m]`) are first-class entries that preserve the suffix verbatim in the response `model` field and do **not** enable extended thinking. On these always-1M models, thinking is opt-in via the `thinking` field; the `[1m]` suffix remains a thinking opt-in for models without a first-class always-1M alias.
 
 Unmatched `claude-*` models are passed through as-is. Non-claude models fall back to `claude-sonnet-4.6` (the `gpt-5.6-*` IDs and their `claude-gpt-5.6-*` discovery aliases above are explicit entries and do not fall back).
 

@@ -9,7 +9,7 @@ func TestResolveEffort(t *testing.T) {
 		requested string
 		want      string
 	}{
-		// opus-5 / 4.8 / 4.7 / sonnet-5: full enum including xhigh.
+		// opus-5 / 4.8 / 4.7 / sonnet-5 / fable-5.1: full enum including xhigh.
 		{"opus-5 xhigh", "claude-opus-5", "xhigh", "xhigh"},
 		{"opus-5 max", "claude-opus-5", "max", "max"},
 		{"opus-5 low", "claude-opus-5", "low", "low"},
@@ -20,6 +20,9 @@ func TestResolveEffort(t *testing.T) {
 		{"sonnet-5 xhigh", "claude-sonnet-5", "xhigh", "xhigh"},
 		{"sonnet-5 max", "claude-sonnet-5", "max", "max"},
 		{"sonnet-5 low", "claude-sonnet-5", "low", "low"},
+		{"fable-5.1 xhigh", "claude-fable-5.1", "xhigh", "xhigh"},
+		{"fable-5.1 max", "claude-fable-5.1", "max", "max"},
+		{"fable-5.1 low", "claude-fable-5.1", "low", "low"},
 
 		// opus-4.6 / sonnet-4.6 family: no xhigh. xhigh downgrades to max.
 		{"opus-4.6 high", "claude-opus-4.6", "high", "high"},

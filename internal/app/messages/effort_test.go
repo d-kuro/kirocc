@@ -26,6 +26,9 @@ func TestResolveEffort(t *testing.T) {
 		// sonnet-5 is the first Sonnet with a 5-value enum: xhigh is honored, not clamped.
 		{"explicit xhigh honored on sonnet-5", "claude-sonnet-5", "xhigh", false, "xhigh", ""},
 		{"explicit high on sonnet-5", "claude-sonnet-5", "high", false, "high", ""},
+		// fable-5.1 shares the 5-value enum: xhigh is honored, not clamped.
+		{"explicit xhigh honored on fable-5.1", "claude-fable-5.1", "xhigh", false, "xhigh", ""},
+		{"explicit high on fable-5.1", "claude-fable-5.1", "high", false, "high", ""},
 
 		// No effort + no thinking: nothing sent.
 		{"no effort no thinking", "claude-opus-4.8", "", false, "", ""},

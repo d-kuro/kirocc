@@ -85,6 +85,18 @@ func TestE2E_ResponseModel_NonStreaming(t *testing.T) {
 			wantUpstream: "claude-sonnet-5",
 		},
 		{
+			name:         "fable-5-1 always-1M gets [1m] suffix in response",
+			requestModel: "claude-fable-5-1",
+			wantResponse: "claude-fable-5-1[1m]",
+			wantUpstream: "claude-fable-5.1",
+		},
+		{
+			name:         "fable-5-1[1m] exact-match preserved verbatim",
+			requestModel: "claude-fable-5-1[1m]",
+			wantResponse: "claude-fable-5-1[1m]",
+			wantUpstream: "claude-fable-5.1",
+		},
+		{
 			name:         "kiro dotted input is rewritten to anthropic hyphen in response",
 			requestModel: "claude-opus-4.7",
 			wantResponse: "claude-opus-4-7[1m]",
@@ -200,6 +212,11 @@ func TestE2E_ResponseModel_Streaming(t *testing.T) {
 			name:         "sonnet-5 uppercase [1M] normalized in message_start",
 			requestModel: "claude-sonnet-5[1M]",
 			wantResponse: "claude-sonnet-5[1m]",
+		},
+		{
+			name:         "fable-5-1 always-1M gets [1m] suffix in message_start",
+			requestModel: "claude-fable-5-1",
+			wantResponse: "claude-fable-5-1[1m]",
 		},
 	}
 
