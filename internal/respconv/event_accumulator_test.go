@@ -114,6 +114,17 @@ func TestAccumulator_MeteringFallback(t *testing.T) {
 	}
 }
 
+func TestAccumulator_EmptyMetadataDoesNotOverrideMetering(t *testing.T) {
+	acc := newAccumulator(200000, nil, 0, 0)
+	acc.ProcessEvent(kiroproto.Event{Type: "meteringEvent", InputTokens: 30, OutputTokens: 10})
+	acc.ProcessEvent(kiroproto.Event{Type: "metadataEvent"})
+
+	input, output := acc.resolvedUsage()
+	if input != 30 || output != 10 {
+		t.Fatalf("resolvedUsage() = (%d, %d), want metering fallback (30, 10)", input, output)
+	}
+}
+
 func TestAccumulator_MeteringCredits(t *testing.T) {
 	var acc responseAccumulator
 

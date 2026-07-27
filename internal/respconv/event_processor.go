@@ -66,11 +66,21 @@ func (a *responseAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 		a.processToolUseEvent(e, &d)
 
 	case kiroproto.EventMetadata:
-		a.HasMetadata = true
-		a.InputTokens = e.InputTokens
-		a.OutputTokens = e.OutputTokens
-		a.CacheReadInputTokens = e.CacheReadInputTokens
-		a.CacheWriteInputTokens = e.CacheWriteInputTokens
+		// Kiro may emit metadataEvent without tokenUsage. Treat an all-zero
+		// event as missing usage rather than authoritative data; otherwise it
+		// would erase metering counts and suppress the pre-count/context fallback.
+		if hasUsableTokenCounts(e.InputTokens, e.OutputTokens) {
+			a.HasMetadata = true
+			a.InputTokens = max(0, e.InputTokens)
+			a.OutputTokens = max(0, e.OutputTokens)
+			a.CacheReadInputTokens = max(0, e.CacheReadInputTokens)
+			a.CacheWriteInputTokens = max(0, e.CacheWriteInputTokens)
+		} else {
+			// Cache creation may be reported independently of the primary counts.
+			// Preserve it without marking the metadata as usable token usage.
+			a.CacheReadInputTokens = max(a.CacheReadInputTokens, e.CacheReadInputTokens)
+			a.CacheWriteInputTokens = max(a.CacheWriteInputTokens, e.CacheWriteInputTokens)
+		}
 
 	case kiroproto.EventMetering:
 		// Reject NaN/Inf/negative so a malformed upstream payload never
@@ -80,9 +90,9 @@ func (a *responseAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 			a.HasCredits = true
 			a.Credits = e.Credits
 		}
-		if !a.HasMetadata {
-			a.InputTokens = e.InputTokens
-			a.OutputTokens = e.OutputTokens
+		if !a.HasMetadata && hasUsableTokenCounts(e.InputTokens, e.OutputTokens) {
+			a.InputTokens = max(0, e.InputTokens)
+			a.OutputTokens = max(0, e.OutputTokens)
 		}
 
 	case kiroproto.EventMessageMetadata:

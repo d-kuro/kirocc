@@ -10,10 +10,17 @@ func (a *responseAccumulator) estimatedOutputTokens() int {
 	return max(1, a.outputRuneCount/4)
 }
 
+// hasUsableTokenCounts reports whether an upstream event contains primary token
+// usage. Successful requests always consume input tokens, so an all-zero pair is
+// an absent/placeholder measurement and must not suppress fallback estimation.
+func hasUsableTokenCounts(inputTokens, outputTokens int) bool {
+	return inputTokens > 0 || outputTokens > 0
+}
+
 // resolvedUsage returns the best available input and output token counts.
 // Priority: metadata/metering > pre-counted (tiktoken) > contextUsage estimate > 0.
 func (a *responseAccumulator) resolvedUsage() (inputTokens, outputTokens int) {
-	if a.HasMetadata || a.InputTokens > 0 || a.OutputTokens > 0 {
+	if hasUsableTokenCounts(a.InputTokens, a.OutputTokens) {
 		return a.InputTokens, a.OutputTokens
 	}
 	if a.PreCountedInputTokens > 0 {

@@ -266,10 +266,16 @@ func TestE2E_Truncation_Content(t *testing.T) {
 	}
 }
 
-func TestE2E_PreCountedTokens_NonStreaming(t *testing.T) {
+func TestE2E_PreCountedTokens_WithEmptyMetadata_NonStreaming(t *testing.T) {
 	p1 := mustJSON(map[string]string{"content": "hello"})
+	emptyMeta := mustJSON(map[string]any{})
+	contextUsage := mustJSON(map[string]any{"contextUsagePercentage": 0.7})
 	client := &capturingClient{
-		events:       []any{"assistantResponseEvent", p1},
+		events: []any{
+			"assistantResponseEvent", p1,
+			"metadataEvent", emptyMeta,
+			"contextUsageEvent", contextUsage,
+		},
 		promptTokens: 500,
 	}
 
@@ -289,10 +295,16 @@ func TestE2E_PreCountedTokens_NonStreaming(t *testing.T) {
 	}
 }
 
-func TestE2E_PreCountedTokens_Streaming(t *testing.T) {
+func TestE2E_PreCountedTokens_WithEmptyMetadata_Streaming(t *testing.T) {
 	p1 := mustJSON(map[string]string{"content": "hello"})
+	emptyMeta := mustJSON(map[string]any{})
+	contextUsage := mustJSON(map[string]any{"contextUsagePercentage": 0.7})
 	client := &capturingClient{
-		events:       []any{"assistantResponseEvent", p1},
+		events: []any{
+			"assistantResponseEvent", p1,
+			"metadataEvent", emptyMeta,
+			"contextUsageEvent", contextUsage,
+		},
 		promptTokens: 750,
 	}
 
@@ -311,10 +323,16 @@ func TestE2E_PreCountedTokens_Streaming(t *testing.T) {
 	}
 }
 
-func TestE2E_PreCountedTokens_ZeroFallback(t *testing.T) {
+func TestE2E_ContextUsageFallback_WhenPreCountIsZero(t *testing.T) {
 	p1 := mustJSON(map[string]string{"content": "hello"})
+	emptyMeta := mustJSON(map[string]any{})
+	contextUsage := mustJSON(map[string]any{"contextUsagePercentage": 10.0})
 	client := &capturingClient{
-		events:       []any{"assistantResponseEvent", p1},
+		events: []any{
+			"assistantResponseEvent", p1,
+			"metadataEvent", emptyMeta,
+			"contextUsageEvent", contextUsage,
+		},
 		promptTokens: 0, // simulates tokencount failure
 	}
 
@@ -329,8 +347,11 @@ func TestE2E_PreCountedTokens_ZeroFallback(t *testing.T) {
 	var result map[string]any
 	_ = json.UnmarshalRead(resp.Body, &result)
 	usage := result["usage"].(map[string]any)
-	if int(usage["input_tokens"].(float64)) != 0 {
-		t.Fatalf("input_tokens = %v, want 0 (fallback)", usage["input_tokens"])
+	if int(usage["input_tokens"].(float64)) != 19999 {
+		t.Fatalf("input_tokens = %v, want 19999 (context usage fallback)", usage["input_tokens"])
+	}
+	if int(usage["output_tokens"].(float64)) != 1 {
+		t.Fatalf("output_tokens = %v, want 1 (estimated fallback)", usage["output_tokens"])
 	}
 }
 
