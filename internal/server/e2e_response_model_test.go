@@ -19,6 +19,18 @@ func TestE2E_ResponseModel_NonStreaming(t *testing.T) {
 		wantUpstream string // Kiro SKU sent upstream
 	}{
 		{
+			name:         "opus-5 gets 1m suffix in response",
+			requestModel: "claude-opus-5",
+			wantResponse: "claude-opus-5[1m]",
+			wantUpstream: "claude-opus-5",
+		},
+		{
+			name:         "opus-5[1m] exact-match preserved verbatim",
+			requestModel: "claude-opus-5[1m]",
+			wantResponse: "claude-opus-5[1m]",
+			wantUpstream: "claude-opus-5",
+		},
+		{
 			name:         "opus-4-8 hyphen preserved in response",
 			requestModel: "claude-opus-4-8",
 			wantResponse: "claude-opus-4-8[1m]",
@@ -127,6 +139,16 @@ func TestE2E_ResponseModel_Streaming(t *testing.T) {
 		requestModel string
 		wantResponse string
 	}{
+		{
+			name:         "opus-5 gets 1m suffix in message_start",
+			requestModel: "claude-opus-5",
+			wantResponse: "claude-opus-5[1m]",
+		},
+		{
+			name:         "opus-5[1m] exact-match preserved verbatim in message_start",
+			requestModel: "claude-opus-5[1m]",
+			wantResponse: "claude-opus-5[1m]",
+		},
 		{
 			name:         "opus-4-8 hyphen preserved in message_start",
 			requestModel: "claude-opus-4-8",

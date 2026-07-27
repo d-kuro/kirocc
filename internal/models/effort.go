@@ -28,6 +28,7 @@ var effortRank = map[string]int{
 // support effort and must omit additionalModelRequestFields entirely.
 var effortEnums = map[string][]string{
 	// 5-value enum (includes xhigh); 128000 max-output models.
+	"claude-opus-5":   {EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
 	"claude-opus-4.8": {EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
 	"claude-opus-4.7": {EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
 	// 5-value enum (includes xhigh); 64000 max-output model.
