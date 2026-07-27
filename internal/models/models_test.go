@@ -31,6 +31,13 @@ func TestResolve(t *testing.T) {
 			wantAnthropicModel: "claude-opus-5[1m]",
 		},
 		{
+			name:               "claude-opus-5 uppercase [1M] is normalized without thinking",
+			model:              "claude-opus-5[1M]",
+			wantKiroModel:      "claude-opus-5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5[1m]",
+		},
+		{
 			name:               "claude-opus-5 with context1M enables thinking",
 			model:              "claude-opus-5",
 			context1M:          true,
@@ -139,6 +146,13 @@ func TestResolve(t *testing.T) {
 			wantAnthropicModel: "claude-sonnet-5[1m]",
 		},
 		{
+			name:               "claude-sonnet-5 uppercase [1M] is normalized without thinking",
+			model:              "claude-sonnet-5[1M]",
+			wantKiroModel:      "claude-sonnet-5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-5[1m]",
+		},
+		{
 			name:               "claude-sonnet-5 with context1M enables thinking",
 			model:              "claude-sonnet-5",
 			context1M:          true,
@@ -164,6 +178,14 @@ func TestResolve(t *testing.T) {
 		{
 			name:               "claude-sonnet-4-6 with thinking suffix",
 			model:              "claude-sonnet-4-6[1m]",
+			wantKiroModel:      "claude-sonnet-4.6-1m",
+			wantThinking:       true,
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-4-6[1m]",
+		},
+		{
+			name:               "claude-sonnet-4-6 uppercase [1M] selects 1m SKU",
+			model:              "claude-sonnet-4-6[1M]",
 			wantKiroModel:      "claude-sonnet-4.6-1m",
 			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,

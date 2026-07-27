@@ -31,6 +31,12 @@ func TestE2E_ResponseModel_NonStreaming(t *testing.T) {
 			wantUpstream: "claude-opus-5",
 		},
 		{
+			name:         "opus-5 uppercase [1M] normalized",
+			requestModel: "claude-opus-5[1M]",
+			wantResponse: "claude-opus-5[1m]",
+			wantUpstream: "claude-opus-5",
+		},
+		{
 			name:         "opus-4-8 hyphen preserved in response",
 			requestModel: "claude-opus-4-8",
 			wantResponse: "claude-opus-4-8[1m]",
@@ -69,6 +75,12 @@ func TestE2E_ResponseModel_NonStreaming(t *testing.T) {
 		{
 			name:         "sonnet-5[1m] exact-match preserved verbatim",
 			requestModel: "claude-sonnet-5[1m]",
+			wantResponse: "claude-sonnet-5[1m]",
+			wantUpstream: "claude-sonnet-5",
+		},
+		{
+			name:         "sonnet-5 uppercase [1M] normalized",
+			requestModel: "claude-sonnet-5[1M]",
 			wantResponse: "claude-sonnet-5[1m]",
 			wantUpstream: "claude-sonnet-5",
 		},
@@ -150,6 +162,11 @@ func TestE2E_ResponseModel_Streaming(t *testing.T) {
 			wantResponse: "claude-opus-5[1m]",
 		},
 		{
+			name:         "opus-5 uppercase [1M] normalized in message_start",
+			requestModel: "claude-opus-5[1M]",
+			wantResponse: "claude-opus-5[1m]",
+		},
+		{
 			name:         "opus-4-8 hyphen preserved in message_start",
 			requestModel: "claude-opus-4-8",
 			wantResponse: "claude-opus-4-8[1m]",
@@ -177,6 +194,11 @@ func TestE2E_ResponseModel_Streaming(t *testing.T) {
 		{
 			name:         "sonnet-5 always-1M gets [1m] suffix in message_start",
 			requestModel: "claude-sonnet-5",
+			wantResponse: "claude-sonnet-5[1m]",
+		},
+		{
+			name:         "sonnet-5 uppercase [1M] normalized in message_start",
+			requestModel: "claude-sonnet-5[1M]",
 			wantResponse: "claude-sonnet-5[1m]",
 		},
 	}

@@ -232,6 +232,9 @@ Thinking is enabled by any of:
 
 Exception: the `[1m]` suffix on an **always-1M** model (`claude-opus-5[1m]` / `claude-opus-4-8[1m]` / `claude-opus-4-7[1m]` / `claude-opus-4-6[1m]` / `claude-sonnet-5[1m]`) is a first-class alias that only advertises the 1M context window — it does **not** enable thinking (see [Model mappings](#model-mappings)). Thinking on those models is still opt-in via the `context-1m` header or the `thinking` field.
 
+The suffix is matched case-insensitively because Claude Code may emit `[1M]`
+from internal call paths. Responses always use the canonical lowercase `[1m]`.
+
 The reasoning effort sent to the backend is resolved as follows:
 
 1. An explicit, recognized `output_config.effort` wins, validated/clamped to the model's allowed enum (`xhigh` on a 4-value model clamps to `max`; unrecognized strings are dropped).
