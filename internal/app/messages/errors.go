@@ -26,18 +26,55 @@ var retryableInvalidStateReasons = map[string]struct{}{
 	"STALE_CONVERSATION":               {},
 }
 
-// handleUpstreamError writes the appropriate error response for upstream failures.
-// Returns a non-empty reason string if the error is retryable, or "" if a final error was written.
-func handleUpstreamError(w http.ResponseWriter, isException bool, invalidReason string) string {
+type upstreamErrorClassification struct {
+	retryReason string
+	final       streamFinalError
+}
+
+type streamFinalError struct {
+	status      int
+	jsonType    string
+	jsonMessage string
+	sseType     string
+	sseMessage  string
+}
+
+func newStreamFinalError(status int, errType, message string) streamFinalError {
+	return streamFinalError{
+		status:      status,
+		jsonType:    errType,
+		jsonMessage: message,
+		sseType:     errType,
+		sseMessage:  message,
+	}
+}
+
+// classifyUpstreamError separates upstream event classification from response
+// writing so streaming callers can choose JSON or SSE based on session state.
+func classifyUpstreamError(isException bool, invalidReason, upstreamMessage string) upstreamErrorClassification {
 	if isException {
-		httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream exception")
-		return ""
+		final := newStreamFinalError(http.StatusBadGateway, errTypeAPI, "upstream exception")
+		if upstreamMessage != "" {
+			final.sseMessage = upstreamMessage
+		}
+		return upstreamErrorClassification{final: final}
+	}
+	final := newStreamFinalError(
+		http.StatusBadRequest,
+		errTypeInvalidRequest,
+		"invalid state: request rejected by upstream",
+	)
+	final.sseType = "invalid_state"
+	if upstreamMessage != "" {
+		final.sseMessage = upstreamMessage
+	}
+	classification := upstreamErrorClassification{
+		final: final,
 	}
 	if _, ok := retryableInvalidStateReasons[invalidReason]; ok {
-		return invalidReason
+		classification.retryReason = invalidReason
 	}
-	httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, "invalid state: request rejected by upstream")
-	return ""
+	return classification
 }
 
 // logUpstreamError logs a "kiro api error" with structured attributes when the

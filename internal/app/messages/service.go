@@ -2,6 +2,7 @@ package messages
 
 import (
 	"context"
+	"time"
 
 	"github.com/d-kuro/kirocc/internal/auth"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
@@ -14,9 +15,10 @@ type TokenGetter interface {
 
 // Service owns message execution and token counting flows.
 type Service struct {
-	auth           TokenGetter
-	client         kiroclient.Client
-	captureEnabled bool
+	auth              TokenGetter
+	client            kiroclient.Client
+	captureEnabled    bool
+	keepAliveInterval time.Duration
 }
 
 // Option configures a Service.
@@ -27,6 +29,12 @@ type Option func(*Service)
 // when debug logging is on.
 func WithCapture(enabled bool) Option {
 	return func(s *Service) { s.captureEnabled = enabled }
+}
+
+// WithKeepAliveInterval sets the idle interval for SSE keep-alive comments.
+// A zero duration disables the heartbeat.
+func WithKeepAliveInterval(interval time.Duration) Option {
+	return func(s *Service) { s.keepAliveInterval = interval }
 }
 
 // New constructs a message service.

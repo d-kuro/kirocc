@@ -6,23 +6,29 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"time"
 
 	"github.com/d-kuro/kirocc/internal/logging"
 )
 
-// DefaultOTelBodyLimit is the default max bytes of request body to capture in OTel spans.
-const DefaultOTelBodyLimit = 32 * 1024
+const (
+	// DefaultOTelBodyLimit is the default max bytes of request body to capture in OTel spans.
+	DefaultOTelBodyLimit = 32 * 1024
+	// DefaultKeepAliveInterval is the default idle time between SSE keep-alive comments.
+	DefaultKeepAliveInterval = 15 * time.Second
+)
 
 // Config is the runtime configuration for kirocc.
 type Config struct {
-	Port          int
-	Host          string
-	DBPath        string
-	APIKey        string
-	Debug         bool
-	OTel          bool
-	OTelBodyLimit int
-	LogFile       logging.LogFileConfig
+	Port              int
+	Host              string
+	DBPath            string
+	APIKey            string
+	Debug             bool
+	OTel              bool
+	OTelBodyLimit     int
+	KeepAliveInterval time.Duration
+	LogFile           logging.LogFileConfig
 }
 
 // DefaultDBPath returns the default kiro-cli SQLite database location.
@@ -61,6 +67,9 @@ func ApplyEnvOverrides(cfg *Config) error {
 	if err := applyInt("KIROCC_OTEL_BODY_LIMIT", &cfg.OTelBodyLimit); err != nil {
 		return err
 	}
+	if err := applyDuration("KIROCC_KEEPALIVE_INTERVAL", &cfg.KeepAliveInterval); err != nil {
+		return err
+	}
 	applyString("KIROCC_LOG_FILE", &cfg.LogFile.Path)
 	if err := applyInt("KIROCC_LOG_MAX_SIZE", &cfg.LogFile.MaxSize); err != nil {
 		return err
@@ -93,6 +102,9 @@ func (c *Config) Validate() error {
 	if c.OTelBodyLimit < 0 {
 		return fmt.Errorf("otel-body-limit must be >= 0, got %d", c.OTelBodyLimit)
 	}
+	if c.KeepAliveInterval != 0 && c.KeepAliveInterval < time.Second {
+		return fmt.Errorf("keepalive-interval must be 0 or >= 1s, got %s", c.KeepAliveInterval)
+	}
 	return nil
 }
 
@@ -120,6 +132,17 @@ func applyBool(key string, dst *bool) error {
 			return fmt.Errorf("invalid %s=%q: %w", key, v, err)
 		}
 		*dst = b
+	}
+	return nil
+}
+
+func applyDuration(key string, dst *time.Duration) error {
+	if v := os.Getenv(key); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("invalid %s=%q: %w", key, v, err)
+		}
+		*dst = d
 	}
 	return nil
 }
