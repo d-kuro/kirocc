@@ -134,6 +134,7 @@ func (s *streamSession) Err() error {
 }
 
 func (s *streamSession) writeSocketLocked(p []byte) (int, error) {
+	s.armWriteDeadlineLocked()
 	n, err := s.w.Write(p)
 	if n > 0 {
 		s.committed = true
@@ -153,6 +154,7 @@ func (s *streamSession) flushSocketLocked() error {
 	if s.firstErr != nil {
 		return s.firstErr
 	}
+	s.armWriteDeadlineLocked()
 	if err := s.rc.Flush(); err != nil {
 		s.storeErrorLocked(err)
 		return s.firstErr
@@ -166,4 +168,12 @@ func (s *streamSession) flushSocketLocked() error {
 		}
 	}
 	return nil
+}
+
+// armWriteDeadlineLocked bounds the next socket write/flush so a client that
+// stops reading cannot block the session mutex (and Stop) indefinitely.
+// Unsupported transports (http.ErrNotSupported) are ignored: recorder-style
+// writers in tests and exotic wrappers simply keep the unbounded behavior.
+func (s *streamSession) armWriteDeadlineLocked() {
+	_ = s.rc.SetWriteDeadline(time.Now().Add(socketWriteTimeout))
 }

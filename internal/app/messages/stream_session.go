@@ -12,6 +12,12 @@ import (
 
 const keepAliveComment = ": keep-alive\n\n"
 
+// socketWriteTimeout bounds each downstream write/flush. Without it a client
+// that stops reading (without closing) would block the session mutex forever,
+// wedging Stop, Promote and WriteFinalError. The server deliberately sets no
+// global WriteTimeout, so this per-write deadline is the only bound.
+const socketWriteTimeout = 30 * time.Second
+
 // streamSession owns every downstream write for one streaming /v1/messages
 // request, including transparent retries and tool-search rounds.
 type streamSession struct {
@@ -67,13 +73,15 @@ func (s *streamSession) Start() {
 		if s.interval <= 0 {
 			return
 		}
+		// The stopped-check and wg.Add must share one critical section:
+		// otherwise Stop can observe wg counter zero, return, and only then
+		// have Start launch a heartbeat that outlives Stop's join guarantee.
 		s.mu.Lock()
-		s.lastActivity = time.Now()
-		stopped := s.stopped
-		s.mu.Unlock()
-		if stopped {
+		defer s.mu.Unlock()
+		if s.stopped {
 			return
 		}
+		s.lastActivity = time.Now()
 		s.wg.Add(1)
 		go s.runHeartbeat()
 	})

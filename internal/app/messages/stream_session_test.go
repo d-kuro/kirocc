@@ -11,12 +11,13 @@ import (
 )
 
 type sessionResponseWriter struct {
-	mu       sync.Mutex
-	header   http.Header
-	writes   chan string
-	writeErr error
-	flushErr error
-	count    int
+	mu        sync.Mutex
+	header    http.Header
+	writes    chan string
+	writeErr  error
+	flushErr  error
+	count     int
+	deadlines int
 }
 
 func newSessionResponseWriter() *sessionResponseWriter {
@@ -46,6 +47,19 @@ func (w *sessionResponseWriter) FlushError() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.flushErr
+}
+
+func (w *sessionResponseWriter) SetWriteDeadline(time.Time) error {
+	w.mu.Lock()
+	w.deadlines++
+	w.mu.Unlock()
+	return nil
+}
+
+func (w *sessionResponseWriter) deadlineCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.deadlines
 }
 
 func (w *sessionResponseWriter) setWriteError(err error) {
@@ -238,6 +252,67 @@ func TestStreamSession_StopJoinsHeartbeat(t *testing.T) {
 	}
 	if got := w.writeCount(); got != writesAfterStop {
 		t.Fatalf("write count after Stop = %d, want %d", got, writesAfterStop)
+	}
+}
+
+func TestStreamSession_ConcurrentStartStopNeverLeaksHeartbeat(t *testing.T) {
+	// Start's stopped-check and wg.Add must be one atomic section: if Stop
+	// wins the race, Start must not launch a heartbeat that outlives Stop.
+	for range 200 {
+		w := newSessionResponseWriter()
+		session := newStreamSession(context.Background(), w, time.Millisecond)
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			session.Start()
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			session.Stop()
+		}()
+		close(start)
+		wg.Wait()
+
+		// Stop has returned (possibly before Start). A second Stop must also
+		// join any goroutine Start may have launched.
+		session.Stop()
+		writesAfterStop := w.writeCount()
+		time.Sleep(3 * time.Millisecond)
+		if got := w.writeCount(); got != writesAfterStop {
+			t.Fatalf("heartbeat wrote after Stop returned: %d -> %d", writesAfterStop, got)
+		}
+	}
+}
+
+func TestStreamSession_SocketWritesSetWriteDeadline(t *testing.T) {
+	// Every socket write/flush must be preceded by a write deadline so a
+	// stalled client cannot block the session mutex (and thus Stop) forever.
+	w := newSessionResponseWriter()
+	session := newStreamSession(t.Context(), w, 0)
+
+	if err := session.WriteKeepAlive(); err != nil {
+		t.Fatalf("WriteKeepAlive: %v", err)
+	}
+	_ = receiveSessionWrite(t, w.writes)
+	if got := w.deadlineCount(); got == 0 {
+		t.Fatal("WriteKeepAlive did not set a write deadline before writing")
+	}
+
+	before := w.deadlineCount()
+	if _, err := session.Write([]byte("semantic")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := session.Promote(); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	_ = receiveSessionWrite(t, w.writes)
+	if got := w.deadlineCount(); got <= before {
+		t.Fatal("Promote did not set a write deadline before flushing buffered output")
 	}
 }
 
