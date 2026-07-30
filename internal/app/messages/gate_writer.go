@@ -1,85 +1,169 @@
 package messages
 
 import (
-	"bytes"
+	"io"
 	"net/http"
+	"time"
 )
 
-// GateWriter wraps an http.ResponseWriter and buffers all writes until Promote
-// is called. This allows the server to discard buffered SSE events (e.g. on
-// empty visible end_turn) and retry the upstream request transparently.
-type GateWriter struct {
-	w          http.ResponseWriter
-	buf        bytes.Buffer
-	promoted   bool
-	statusCode int // deferred status code (0 = not set)
+// Header returns the underlying ResponseWriter's header map. Callers must set
+// headers before Start, when the heartbeat can begin committing the response.
+func (s *streamSession) Header() http.Header {
+	return s.w.Header()
 }
 
-// NewGateWriter creates a GateWriter that buffers writes to w.
-func NewGateWriter(w http.ResponseWriter) *GateWriter {
-	return &GateWriter{w: w}
-}
-
-// Header returns the underlying ResponseWriter's header map.
-func (g *GateWriter) Header() http.Header {
-	return g.w.Header()
-}
-
-// WriteHeader captures the status code. In buffered mode it defers the actual
-// call until Promote; in promoted mode it delegates immediately.
-func (g *GateWriter) WriteHeader(statusCode int) {
-	if g.promoted {
-		g.w.WriteHeader(statusCode)
+// SetSSEHeaders installs transport headers once under the same mutex used by
+// heartbeat writes. Retry attempts therefore never mutate the header map after
+// the response may have been committed.
+func (s *streamSession) SetSSEHeaders() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.headersSet || s.committed || s.finalized {
 		return
 	}
-	g.statusCode = statusCode
+	h := s.w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("Connection", "keep-alive")
+	s.headersSet = true
 }
 
-// Write buffers data before promotion, or writes directly after.
-func (g *GateWriter) Write(p []byte) (int, error) {
-	if g.promoted {
-		return g.w.Write(p)
-	}
-	return g.buf.Write(p)
-}
-
-// Flush delegates to the underlying Flusher if promoted.
-func (g *GateWriter) Flush() {
-	if !g.promoted {
+// WriteHeader defers the status until promotion while semantic events are
+// buffered. Once promoted, it delegates to the real writer.
+func (s *streamSession) WriteHeader(statusCode int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.firstErr != nil || s.stopped || s.finalized {
 		return
 	}
-	if f, ok := g.w.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-// Promote flushes the buffer to the real ResponseWriter and switches to
-// direct-write mode. All subsequent Write calls go straight through.
-func (g *GateWriter) Promote() {
-	if g.promoted {
+	if s.promoted {
+		s.w.WriteHeader(statusCode)
 		return
 	}
-	g.promoted = true
-	if g.statusCode != 0 {
-		g.w.WriteHeader(g.statusCode)
-	}
-	if g.buf.Len() > 0 {
-		_, _ = g.w.Write(g.buf.Bytes())
-		g.buf.Reset()
-	}
-	if f, ok := g.w.(http.Flusher); ok {
-		f.Flush()
-	}
+	s.statusCode = statusCode
 }
 
-// Discard drops the buffered data without writing it to the client.
-// Must only be called before Promote.
-func (g *GateWriter) Discard() {
-	g.buf.Reset()
-	g.statusCode = 0
+// Write buffers semantic SSE bytes before promotion and writes directly after
+// promotion. Transport keep-alives bypass this method's buffer.
+func (s *streamSession) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.unavailableLocked(); err != nil {
+		return 0, err
+	}
+	if !s.promoted {
+		return s.buf.Write(p)
+	}
+	return s.writeSocketLocked(p)
 }
 
-// IsPromoted reports whether the writer has been promoted to direct mode.
-func (g *GateWriter) IsPromoted() bool {
-	return g.promoted
+// Flush implements http.Flusher. Pre-promotion semantic writes are not flushed.
+// Flush errors are retained by Err so SSEWriter can observe them.
+func (s *streamSession) Flush() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.promoted || s.firstErr != nil || s.stopped || s.finalized {
+		return
+	}
+	_ = s.flushSocketLocked()
+}
+
+// Promote flushes buffered semantic events and switches to direct mode.
+func (s *streamSession) Promote() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.unavailableLocked(); err != nil {
+		return err
+	}
+	if s.promoted {
+		return s.firstErr
+	}
+
+	s.promoted = true
+	hadOutput := s.statusCode != 0 || s.buf.Len() > 0
+	if s.statusCode != 0 {
+		s.w.WriteHeader(s.statusCode)
+	}
+	if s.buf.Len() > 0 {
+		data := append([]byte(nil), s.buf.Bytes()...)
+		if _, err := s.writeSocketLocked(data); err != nil {
+			return err
+		}
+		s.buf.Reset()
+	}
+	if err := s.flushSocketLocked(); err != nil {
+		return err
+	}
+	if hadOutput {
+		s.committed = true
+	}
+	return nil
+}
+
+// Discard drops only buffered semantic data. A keep-alive may already have
+// committed HTTP 200; that transport state intentionally remains unchanged.
+func (s *streamSession) Discard() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.promoted {
+		return
+	}
+	s.buf.Reset()
+	s.statusCode = 0
+}
+
+// IsPromoted reports whether semantic events are writing directly downstream.
+func (s *streamSession) IsPromoted() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.promoted
+}
+
+// Committed reports whether bytes have reached the downstream response.
+func (s *streamSession) Committed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.committed
+}
+
+// Err returns the first downstream write or flush error.
+func (s *streamSession) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.firstErr
+}
+
+func (s *streamSession) writeSocketLocked(p []byte) (int, error) {
+	n, err := s.w.Write(p)
+	if n > 0 {
+		s.committed = true
+	}
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		s.storeErrorLocked(err)
+		return n, s.firstErr
+	}
+	s.pendingFlush = true
+	return n, nil
+}
+
+func (s *streamSession) flushSocketLocked() error {
+	if s.firstErr != nil {
+		return s.firstErr
+	}
+	if err := s.rc.Flush(); err != nil {
+		s.storeErrorLocked(err)
+		return s.firstErr
+	}
+	if s.pendingFlush {
+		s.pendingFlush = false
+		s.lastActivity = time.Now()
+		select {
+		case s.activity <- struct{}{}:
+		default:
+		}
+	}
+	return nil
 }

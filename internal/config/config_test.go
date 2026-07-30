@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestApplyString(t *testing.T) {
 	tests := []struct {
@@ -86,6 +89,43 @@ func TestApplyBool(t *testing.T) {
 	}
 }
 
+func TestApplyEnvOverrides_KeepAliveInterval(t *testing.T) {
+	tests := []struct {
+		name         string
+		value        string
+		want         time.Duration
+		wantApplyErr bool
+		wantValidErr bool
+	}{
+		{name: "duration", value: "15s", want: 15 * time.Second},
+		{name: "disabled", value: "0", want: 0},
+		{name: "negative", value: "-1s", want: -time.Second, wantValidErr: true},
+		{name: "invalid", value: "not-a-duration", wantApplyErr: true},
+		{name: "too small", value: "500ms", want: 500 * time.Millisecond, wantValidErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KIROCC_KEEPALIVE_INTERVAL", tt.value)
+			cfg := Config{Host: "127.0.0.1", Port: 3456, KeepAliveInterval: DefaultKeepAliveInterval}
+
+			err := ApplyEnvOverrides(&cfg)
+			if (err != nil) != tt.wantApplyErr {
+				t.Fatalf("ApplyEnvOverrides() err = %v, wantApplyErr = %v", err, tt.wantApplyErr)
+			}
+			if tt.wantApplyErr {
+				return
+			}
+			if cfg.KeepAliveInterval != tt.want {
+				t.Fatalf("KeepAliveInterval = %v, want %v", cfg.KeepAliveInterval, tt.want)
+			}
+			if err := cfg.Validate(); (err != nil) != tt.wantValidErr {
+				t.Fatalf("Validate() err = %v, wantValidErr = %v", err, tt.wantValidErr)
+			}
+		})
+	}
+}
+
 func TestDefaultDBPathFor(t *testing.T) {
 	tests := []struct {
 		name string
@@ -160,6 +200,10 @@ func TestConfig_Validate(t *testing.T) {
 		{"port negative", Config{Host: "127.0.0.1", Port: -1}, true},
 		{"port too large", Config{Host: "127.0.0.1", Port: 70000}, true},
 		{"negative otel body limit", Config{Host: "127.0.0.1", Port: 3456, OTelBodyLimit: -1}, true},
+		{"keep-alive disabled", Config{Host: "127.0.0.1", Port: 3456, KeepAliveInterval: 0}, false},
+		{"keep-alive minimum", Config{Host: "127.0.0.1", Port: 3456, KeepAliveInterval: time.Second}, false},
+		{"keep-alive negative", Config{Host: "127.0.0.1", Port: 3456, KeepAliveInterval: -time.Second}, true},
+		{"keep-alive too small", Config{Host: "127.0.0.1", Port: 3456, KeepAliveInterval: 500 * time.Millisecond}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

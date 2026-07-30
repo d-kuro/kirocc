@@ -132,13 +132,27 @@ func (s *Service) runToolSearch(ctx context.Context, w http.ResponseWriter, req 
 		contextWindowSize: contextWindowSize,
 		responseModel:     responseModel,
 	}
-	reason := orch.run(ctx, w)
+	if req.Stream {
+		session := newStreamSession(ctx, w, s.keepAliveInterval)
+		defer session.Stop()
+		s.runToolSearchWithRetry(session.Context(), session, session, orch, short)
+		return
+	}
+	s.runToolSearchWithRetry(ctx, w, nil, orch, short)
+}
+
+func (s *Service) runToolSearchWithRetry(ctx context.Context, w http.ResponseWriter, session *streamSession, orch *toolSearchOrchestrator, short string) {
+	reason := orch.run(ctx, w, session)
 	if reason != retryReasonEmptyVisibleEndTurn {
 		return
 	}
 	slog.WarnContext(ctx, "retrying tool search after empty visible end_turn", "trace_id", short)
-	if r2 := orch.run(ctx, w); r2 == retryReasonEmptyVisibleEndTurn {
+	if r2 := orch.run(ctx, w, session); r2 == retryReasonEmptyVisibleEndTurn {
 		slog.ErrorContext(ctx, "tool search retry also returned empty visible end_turn", "trace_id", short)
-		httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream returned empty response")
+		if session != nil {
+			_ = session.WriteFinalError(newStreamFinalError(http.StatusBadGateway, errTypeAPI, "upstream returned empty response"), nil)
+		} else {
+			httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream returned empty response")
+		}
 	}
 }

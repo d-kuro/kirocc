@@ -22,21 +22,25 @@ type SSEWriter struct {
 	blockIndex int
 	activeType string // "thinking", "text", "tool_use", or ""
 	started    bool
-	writeErr   bool // true if a write/flush to the client failed
+	writeErr   error
 	acc        responseAccumulator
 
 	// OnVisibleOutput is called once, just before the first visible output
-	// (text delta or tool_use) is written. Used by GateWriter to promote
+	// (text delta or tool_use) is written. Used by the stream session to promote
 	// the buffered writer to direct mode.
-	OnVisibleOutput func()
+	OnVisibleOutput func() error
 	visibleFired    bool
 }
 
 // NewSSEWriter creates a new SSEWriter and sets response headers.
 func NewSSEWriter(ctx context.Context, w http.ResponseWriter, model string, contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int) *SSEWriter {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
+	if setter, ok := w.(interface{ SetSSEHeaders() }); ok {
+		setter.SetSSEHeaders()
+	} else {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+	}
 
 	f, _ := w.(http.Flusher)
 	sw := &SSEWriter{
@@ -61,8 +65,8 @@ func (s *SSEWriter) LocalStop() bool {
 	return s.acc.LocalStop
 }
 
-// WriteErr reports whether a write to the client failed (client likely disconnected).
-func (s *SSEWriter) WriteErr() bool {
+// WriteErr returns the first downstream write, promotion, or flush error.
+func (s *SSEWriter) WriteErr() error {
 	return s.writeErr
 }
 
@@ -85,7 +89,7 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 			s.writeDelta("text_delta", "text", d.TextDelta)
 		}
 		if d.StopSignal {
-			s.Finish()
+			_ = s.Finish()
 			return true
 		}
 
@@ -111,7 +115,7 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 		}
 		s.writeThinkingDelta(d)
 		if d.StopSignal {
-			s.Finish()
+			_ = s.Finish()
 			return true
 		}
 
@@ -119,7 +123,7 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 		if d.ThinkingDelta != "" {
 			s.writeThinkingDelta(d)
 			if d.StopSignal {
-				s.Finish()
+				_ = s.Finish()
 				return true
 			}
 			return false
@@ -151,35 +155,31 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 			},
 		})
 		if d.StopSignal {
-			s.Finish()
+			_ = s.Finish()
 			return true
 		}
 
 	case kiroproto.EventInvalidState, kiroproto.EventException:
-		if !s.started {
-			return true
-		}
-		errType := "invalid_state"
-		if e.Type == kiroproto.EventException {
-			errType = "api_error"
-		}
-		s.WriteError(errType, d.ErrorMessage)
+		// Error classification and JSON-vs-SSE output belong to the request-scoped
+		// stream session, which knows whether HTTP is committed and whether
+		// semantic output has been promoted.
 		return true
 	}
 	return false
 }
 
 // WriteError writes an error SSE event to the stream.
-func (s *SSEWriter) WriteError(errType, message string) {
+func (s *SSEWriter) WriteError(errType, message string) error {
 	s.closeActiveBlock()
 	s.writeSSE("error", map[string]any{
 		"type":  "error",
 		"error": map[string]any{"type": errType, "message": message},
 	})
+	return s.writeErr
 }
 
 // Finish writes the closing SSE events (message_delta + message_stop).
-func (s *SSEWriter) Finish() {
+func (s *SSEWriter) Finish() error {
 	s.ensureStarted()
 
 	textDelta, thinkingDelta, res := finalizeResult(&s.acc)
@@ -195,7 +195,7 @@ func (s *SSEWriter) Finish() {
 	s.closeActiveBlock()
 
 	// Do NOT inject an empty text block here. If this is a thinking-only
-	// response, the caller (GateWriter) will detect it via IsEmptyVisibleEndTurn
+	// response, the caller will detect it via IsEmptyVisibleEndTurn
 	// and retry the request instead.
 
 	s.writeSSE("message_delta", map[string]any{
@@ -209,6 +209,7 @@ func (s *SSEWriter) Finish() {
 	s.writeSSE("message_stop", map[string]any{
 		"type": "message_stop",
 	})
+	return s.writeErr
 }
 
 func (s *SSEWriter) ensureStarted() {
@@ -339,7 +340,9 @@ func (s *SSEWriter) fireVisibleOutput() {
 	}
 	s.visibleFired = true
 	if s.OnVisibleOutput != nil {
-		s.OnVisibleOutput()
+		if err := s.OnVisibleOutput(); err != nil && s.writeErr == nil {
+			s.writeErr = err
+		}
 	}
 }
 
@@ -376,7 +379,7 @@ func (s *SSEWriter) ResetAccumulator(contextWindowSize int, stopSequences []stri
 }
 
 func (s *SSEWriter) writeSSE(eventType string, data map[string]any) {
-	if s.writeErr {
+	if s.writeErr != nil {
 		return
 	}
 	b, err := json.Marshal(data)
@@ -386,26 +389,37 @@ func (s *SSEWriter) writeSSE(eventType string, data map[string]any) {
 	}
 	_, err = fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", eventType, b)
 	if err != nil {
-		s.writeErr = true
+		s.writeErr = err
 		return
 	}
 	if s.flusher != nil {
 		s.flusher.Flush()
 	}
+	s.captureWriterError()
 }
 
 // writeRawSSE writes a pre-formatted SSE event using fmt.Fprintf, avoiding map allocation and json.Marshal.
 func (s *SSEWriter) writeRawSSE(eventType, format string, args ...any) {
-	if s.writeErr {
+	if s.writeErr != nil {
 		return
 	}
 	_, err := fmt.Fprintf(s.w, "event: "+eventType+"\ndata: "+format+"\n\n", args...)
 	if err != nil {
-		s.writeErr = true
+		s.writeErr = err
 		return
 	}
 	if s.flusher != nil {
 		s.flusher.Flush()
+	}
+	s.captureWriterError()
+}
+
+func (s *SSEWriter) captureWriterError() {
+	if s.writeErr != nil {
+		return
+	}
+	if reporter, ok := s.w.(interface{ Err() error }); ok {
+		s.writeErr = reporter.Err()
 	}
 }
 
