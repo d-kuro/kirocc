@@ -11,7 +11,16 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Credentials holds authentication credentials read from Kiro CLI's SQLite database.
+// Auth types. Social and IDC are read from Kiro CLI's SQLite database and are
+// refreshable; APIKey is supplied directly via KIRO_API_KEY and is not.
+const (
+	AuthTypeSocial = "social"
+	AuthTypeIDC    = "idc"
+	AuthTypeAPIKey = "api_key"
+)
+
+// Credentials holds authentication credentials, either read from Kiro CLI's
+// SQLite database or, for AuthTypeAPIKey, supplied directly by the user.
 type Credentials struct {
 	AccessToken  string
 	RefreshToken string
@@ -21,7 +30,7 @@ type Credentials struct {
 	ClientID     string
 	ClientSecret string
 	ProfileARN   string // from state table, key "api.codewhisperer.profile"
-	AuthType     string // "social" or "idc" — determined by which token key was found
+	AuthType     string // "social", "idc", or "api_key"
 }
 
 // ErrNoCredentials is returned when no token key is found in the database.

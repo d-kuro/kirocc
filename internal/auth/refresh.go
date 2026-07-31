@@ -25,10 +25,35 @@ func WithHTTPClient(c *http.Client) Option {
 	return func(m *AuthManager) { m.httpClient = c }
 }
 
+// WithAPIKey configures a Kiro API key ("ksk_…", normally from KIRO_API_KEY) as
+// the credential source. Such a key is long-lived and presented directly to the
+// API, so the SQLite database is never opened and no refresh ever happens —
+// which is what lets kirocc run with no Kiro CLI login, in CI or a container.
+// An empty key is ignored, leaving the database path in effect.
+func WithAPIKey(key, region string) Option {
+	return func(m *AuthManager) {
+		if key == "" {
+			return
+		}
+		if region == "" {
+			region = defaultAPIKeyRegion
+		}
+		m.apiKey = key
+		m.apiKeyRegion = region
+	}
+}
+
+// defaultAPIKeyRegion is the region to target for API-key auth when none is
+// configured. An API key carries no region of its own, unlike a credential read
+// from the database.
+const defaultAPIKeyRegion = "us-east-1"
+
 // AuthManager manages Kiro credentials with caching and automatic refresh.
 type AuthManager struct {
 	dbPath           string
 	db               *sql.DB // non-nil only in tests via newAuthManagerWithDB
+	apiKey           string  // when set, short-circuits both the DB and refresh
+	apiKeyRegion     string
 	httpClient       *http.Client
 	mu               sync.Mutex
 	cached           *Credentials
@@ -36,6 +61,10 @@ type AuthManager struct {
 	oidcEndpointFn   func(ssoRegion string) string
 	socialEndpointFn func(region string) string
 }
+
+// UsesAPIKey reports whether credentials come from a Kiro API key rather than
+// from the Kiro CLI database.
+func (m *AuthManager) UsesAPIKey() bool { return m.apiKey != "" }
 
 func newDefaultHTTPClient() *http.Client {
 	return &http.Client{Timeout: 30 * time.Second}
@@ -79,6 +108,18 @@ func defaultSocialEndpoint(region string) string {
 // GetToken returns valid credentials, refreshing if necessary.
 // It is safe for concurrent use. Concurrent refresh requests are deduplicated via singleflight.
 func (m *AuthManager) GetToken(ctx context.Context) (*Credentials, error) {
+	// An API key is static: nothing to read, nothing to expire, nothing to
+	// refresh. Checked before the cache so the DB and refresh paths below are
+	// unreachable in this mode — a revoked key therefore surfaces as a 401 from
+	// the API rather than as a refresh failure here.
+	if m.apiKey != "" {
+		return &Credentials{
+			AccessToken: m.apiKey,
+			Region:      m.apiKeyRegion,
+			AuthType:    AuthTypeAPIKey,
+		}, nil
+	}
+
 	m.mu.Lock()
 	// Return cached credentials if still valid (copy to prevent external mutation).
 	if m.cached != nil && isTokenValid(m.cached.ExpiresAt) {

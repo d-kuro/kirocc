@@ -20,10 +20,15 @@ const (
 
 // Config is the runtime configuration for kirocc.
 type Config struct {
-	Port              int
-	Host              string
-	DBPath            string
-	APIKey            string
+	Port   int
+	Host   string
+	DBPath string
+	APIKey string // guards kirocc's own endpoints; unrelated to KiroAPIKey
+	// KiroAPIKey is a Kiro API key ("ksk_…") used upstream instead of the
+	// kiro-cli database credential. Named after Kiro's own KIRO_API_KEY rather
+	// than the KIROCC_* convention, since it is Kiro's credential, not kirocc's.
+	KiroAPIKey        string
+	KiroAPIRegion     string
 	Debug             bool
 	OTel              bool
 	OTelBodyLimit     int
@@ -54,6 +59,10 @@ func DefaultDBPathFor(goos, home string) string {
 func ApplyEnvOverrides(cfg *Config) error {
 	applyString("KIROCC_DB_PATH", &cfg.DBPath)
 	applyString("KIROCC_API_KEY", &cfg.APIKey)
+	// Kiro's own variable names, so a machine already set up for headless
+	// kiro-cli needs no kirocc-specific configuration.
+	applyString("KIRO_API_KEY", &cfg.KiroAPIKey)
+	applyString("KIRO_API_REGION", &cfg.KiroAPIRegion)
 	applyString("KIROCC_HOST", &cfg.Host)
 	if err := applyInt("KIROCC_PORT", &cfg.Port); err != nil {
 		return err
