@@ -170,7 +170,7 @@ func newConsoleHandler(debug bool, level slog.Level) slog.Handler {
 	if debug {
 		return NewOTelHandler(os.Stderr, level)
 	}
-	return tint.NewHandler(os.Stderr, &tint.Options{
+	return tint.NewTextHandler(os.Stderr, &tint.Options{
 		Level:      level,
 		TimeFormat: "2006-01-02 15:04:05",
 	})
