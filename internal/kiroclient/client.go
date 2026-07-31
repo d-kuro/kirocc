@@ -76,6 +76,7 @@ type HTTPClient struct {
 	tokenRefresher TokenRefresher
 	countTokens    func([]byte) (int, error) // nil = skip token counting
 	bodyReadIdle   time.Duration             // idle timeout for response body reads; 0 = use default
+	apiKeyAuth     bool                      // send TokenType: API_KEY with the bearer
 }
 
 // HTTPClientOption configures an HTTPClient.
@@ -89,6 +90,18 @@ func WithBaseURL(url string) HTTPClientOption {
 // WithTokenRefresher sets the token refresh callback for 403 retry.
 func WithTokenRefresher(fn TokenRefresher) HTTPClientOption {
 	return func(c *HTTPClient) { c.tokenRefresher = fn }
+}
+
+// WithAPIKeyAuth marks the bearer credential as a Kiro API key rather than an
+// OAuth access token, which the API distinguishes by a TokenType header. Set
+// once at construction because the credential source is fixed for the process
+// lifetime; this keeps it off the Client interface and out of every call site.
+//
+// Without the header the API treats the bearer as an OAuth token and rejects
+// the call with "profileArn is required for this request" — an API key has no
+// profile ARN to give.
+func WithAPIKeyAuth() HTTPClientOption {
+	return func(c *HTTPClient) { c.apiKeyAuth = true }
 }
 
 // WithTokenCounter sets a function to count prompt tokens from the serialized payload.
@@ -198,6 +211,11 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 		}
 
 		req.Header.Set("Authorization", "Bearer "+currentToken)
+		if c.apiKeyAuth {
+			// Canonical spelling in Kiro's own client is "TokenType"; the header
+			// name is case-insensitive on the wire.
+			req.Header.Set("TokenType", "API_KEY")
+		}
 		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
 		req.Header.Set("Accept", "*/*")
 		req.Header.Set("X-Amz-Target", amzTarget)

@@ -61,7 +61,13 @@ func run(ctx context.Context, args []string) error {
 		slog.Info("OpenTelemetry tracing enabled", "body_limit", cfg.OTelBodyLimit)
 	}
 
-	authMgr := auth.NewAuthManager(cfg.DBPath)
+	authMgr := auth.NewAuthManager(cfg.DBPath, auth.WithAPIKey(cfg.KiroAPIKey, cfg.KiroAPIRegion))
+	if authMgr.UsesAPIKey() {
+		// Say so up front: with a key there is no database read and no refresh,
+		// so the usual "credentials loaded" line never appears and its absence
+		// would otherwise look like a failure.
+		slog.Info("using Kiro API key", "auth_type", auth.AuthTypeAPIKey, "db_read", false)
+	}
 	kiroClient := buildKiroClient(authMgr, cfg)
 	srv := buildServer(authMgr, kiroClient, cfg)
 
@@ -102,6 +108,8 @@ func parseFlags(args []string) (config.Config, error) {
 	fs.StringVar(&cfg.Host, "host", "127.0.0.1", "bind host")
 	fs.StringVar(&cfg.DBPath, "db", config.DefaultDBPath(), "kiro-cli SQLite DB path")
 	fs.StringVar(&cfg.APIKey, "api-key", "", "optional API key for authentication")
+	fs.StringVar(&cfg.KiroAPIKey, "kiro-api-key", "", "Kiro API key (ksk_...) to use instead of the kiro-cli database credential; also KIRO_API_KEY")
+	fs.StringVar(&cfg.KiroAPIRegion, "kiro-api-region", "", "region for Kiro API key auth (default us-east-1); also KIRO_API_REGION")
 	fs.BoolVar(&cfg.Debug, "debug", false, "enable debug logging with OTel JSON Lines output")
 	fs.BoolVar(&cfg.OTel, "otel", false, "enable OpenTelemetry tracing (OTLP HTTP exporter)")
 	fs.IntVar(&cfg.OTelBodyLimit, "otel-body-limit", config.DefaultOTelBodyLimit, "max bytes of request body to capture in OTel spans (0 = unlimited)")
@@ -131,6 +139,9 @@ func buildKiroClient(authMgr *auth.AuthManager, cfg config.Config) kiroclient.Cl
 			}
 			return creds.AccessToken, nil
 		}),
+	}
+	if authMgr.UsesAPIKey() {
+		clientOpts = append(clientOpts, kiroclient.WithAPIKeyAuth())
 	}
 	if cfg.OTel {
 		clientOpts = append(clientOpts, kiroclient.WithOTel(cfg.OTelBodyLimit))
