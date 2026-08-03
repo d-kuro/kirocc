@@ -10,6 +10,7 @@ Just set `ANTHROPIC_BASE_URL` from any Anthropic API client (e.g., Claude Code) 
 - **Request conversion** — Automatically converts Anthropic API requests to Kiro API (AWS Event Stream) format
 - **Response conversion** — Converts Kiro event streams back to Anthropic SSE format
 - **Automatic auth management** — Reads credentials from Kiro CLI's SQLite DB with automatic token refresh (Social / OIDC)
+- **Kiro API key authentication** — Alternatively authenticate with a `KIRO_API_KEY` (`ksk_…`) for headless environments (CI, containers) where an interactive Kiro login is not available
 - **Model mapping** — Maps Anthropic model names (e.g., `claude-sonnet-4-6`) to Kiro model names. Customizable via environment variable
 - **Extended Thinking** — Enable via the `[1m]` suffix, the `thinking` field, or `output_config.effort`. Reasoning depth travels natively as `additionalModelRequestFields.output_config.effort` (validated against each model's enum; defaults to `medium` for effort-capable models when thinking is on without an explicit effort)
 - **Tool Search** — Proxy-side implementation of Anthropic's [Tool Search Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool). Supports `tool_search_tool_regex_20251119` and `tool_search_tool_bm25_20251119` with `defer_loading` for on-demand tool discovery
@@ -24,7 +25,9 @@ Just set `ANTHROPIC_BASE_URL` from any Anthropic API client (e.g., Claude Code) 
 ## Prerequisites
 
 - Go 1.26+
-- [Kiro CLI](https://kiro.dev) installed and logged in
+- One of the following:
+  - [Kiro CLI](https://kiro.dev) installed and logged in, **or**
+  - A Kiro API key (`KIRO_API_KEY`) — available for [Kiro Pro, Pro+, Pro Max, and Power](https://kiro.dev/docs/cli/authentication/) subscribers
 
 ## Installation
 
@@ -60,6 +63,33 @@ claude
 
 `ANTHROPIC_AUTH_TOKEN` is required by Claude Code but not used for authentication by kirocc (credentials are read from Kiro CLI's DB). Any non-empty value works unless `-api-key` is set.
 
+### Use with a Kiro API key
+
+For headless environments (CI, containers, remote machines) where an interactive Kiro login is not available, you can authenticate with a [Kiro API key](https://kiro.dev/docs/cli/authentication/) instead:
+
+```bash
+export KIRO_API_KEY=ksk_...          # your Kiro API key
+kirocc                               # no Kiro CLI login or database needed
+```
+
+When `KIRO_API_KEY` is set:
+- The SQLite credential database is **never opened** — kirocc does not need Kiro CLI installed
+- No token refresh occurs — the key is presented directly to the Kiro API
+- A revoked key surfaces as a 401 from the API at request time
+- An empty or unset key falls back to the credential database as before
+
+Optionally set `KIRO_API_REGION` (default: `us-east-1`) if your Kiro account is in a different region.
+
+Then use with Claude Code as usual:
+
+```bash
+export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
+export ANTHROPIC_AUTH_TOKEN=dummy
+claude
+```
+
+API keys are available for Kiro Pro, Pro+, Pro Max, and Power subscribers. On group subscriptions, an administrator must enable key generation in *Settings → Kiro settings → Enable users to generate API keys*. Create keys at [app.kiro.dev](https://app.kiro.dev) → API Keys.
+
 ### Command-line options
 
 | Flag               | Default                   | Description                                                        |
@@ -68,6 +98,8 @@ claude
 | `-host`            | `127.0.0.1`               | Bind host                                                          |
 | `-db`              | (OS-dependent, see below) | Kiro CLI SQLite DB path                                            |
 | `-api-key`         | (none)                    | API key required to access the proxy                               |
+| `-kiro-api-key`    | (none)                    | Kiro API key (`ksk_…`) for upstream authentication                 |
+| `-kiro-api-region` | `us-east-1`               | Region for Kiro API key authentication                             |
 | `-debug`           | `false`                   | Enable debug logging                                               |
 | `-log-file`        | (none)                    | Write logs to file with rotation (file-only by default)            |
 | `-log-max-size`    | `10`                      | Max log file size in MB before rotation                            |
@@ -95,6 +127,8 @@ Command-line options can be overridden with environment variables.
 | `KIROCC_HOST`            | `-host`              |
 | `KIROCC_DB_PATH`         | `-db`                |
 | `KIROCC_API_KEY`         | `-api-key`           |
+| `KIRO_API_KEY`           | `-kiro-api-key`      |
+| `KIRO_API_REGION`        | `-kiro-api-region`   |
 | `KIROCC_DEBUG`           | `-debug`             |
 | `KIROCC_LOG_FILE`        | `-log-file`          |
 | `KIROCC_LOG_MAX_SIZE`    | `-log-max-size`      |
