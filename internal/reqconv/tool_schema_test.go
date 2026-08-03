@@ -418,3 +418,62 @@ func TestSanitizeJSONSchema_AnyOfOverridesType_Deterministic(t *testing.T) {
 		}
 	}
 }
+
+func TestEnsureObjectRoot_AlreadyObject(t *testing.T) {
+	schema := map[string]any{"type": "object", "properties": map[string]any{"x": map[string]any{"type": "string"}}}
+	got := EnsureObjectRoot(schema)
+	if got["type"] != "object" || got["properties"] == nil {
+		t.Fatalf("should be unchanged: %v", got)
+	}
+}
+
+func TestEnsureObjectRoot_StringType_Wraps(t *testing.T) {
+	schema := map[string]any{"type": "string", "description": "search query"}
+	got := EnsureObjectRoot(schema)
+	if got["type"] != "object" {
+		t.Fatalf("expected object root, got %v", got["type"])
+	}
+	props, ok := got["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("expected properties")
+	}
+	input, ok := props["input"].(map[string]any)
+	if !ok {
+		t.Fatal("expected input property")
+	}
+	if input["type"] != "string" {
+		t.Fatalf("wrapped schema lost type: %v", input)
+	}
+}
+
+func TestEnsureObjectRoot_NoType_AddsObject(t *testing.T) {
+	schema := map[string]any{"properties": map[string]any{"x": map[string]any{}}}
+	got := EnsureObjectRoot(schema)
+	if got["type"] != "object" {
+		t.Fatalf("expected type added, got %v", got["type"])
+	}
+	// Should not wrap — just add the type field.
+	if _, ok := got["properties"].(map[string]any)["x"]; !ok {
+		t.Fatal("original properties lost")
+	}
+}
+
+func TestEnsureObjectRoot_Empty(t *testing.T) {
+	got := EnsureObjectRoot(map[string]any{})
+	if got["type"] != "object" {
+		t.Fatalf("expected object for empty schema, got %v", got)
+	}
+}
+
+func TestEnsureObjectRoot_ArrayType_Wraps(t *testing.T) {
+	schema := map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
+	got := EnsureObjectRoot(schema)
+	if got["type"] != "object" {
+		t.Fatalf("expected object root, got %v", got["type"])
+	}
+	props := got["properties"].(map[string]any)
+	input := props["input"].(map[string]any)
+	if input["type"] != "array" {
+		t.Fatalf("wrapped schema lost type: %v", input)
+	}
+}
