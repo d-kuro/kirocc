@@ -16,8 +16,10 @@ import (
 
 	"github.com/d-kuro/kirocc/internal/auth"
 	"github.com/d-kuro/kirocc/internal/config"
+	"github.com/d-kuro/kirocc/internal/kirocatalog"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
 	"github.com/d-kuro/kirocc/internal/logging"
+	"github.com/d-kuro/kirocc/internal/models"
 	"github.com/d-kuro/kirocc/internal/server"
 	"github.com/d-kuro/kirocc/internal/tokencount"
 	"github.com/d-kuro/kirocc/internal/tracing"
@@ -68,8 +70,15 @@ func run(ctx context.Context, args []string) error {
 		// would otherwise look like a failure.
 		slog.Info("using Kiro API key", "auth_type", auth.AuthTypeAPIKey, "db_read", false)
 	}
+	if cfg.KiroAPIRegion != "" {
+		slog.Info("Kiro API region pinned", "region", cfg.KiroAPIRegion)
+	}
 	kiroClient := buildKiroClient(authMgr, cfg)
 	srv := buildServer(authMgr, kiroClient, cfg)
+
+	if cfg.ModelDiscovery {
+		go discoverModels(ctx, authMgr, cfg.KiroAPIRegion)
+	}
 
 	// Eagerly initialize tiktoken so the first API request doesn't block on BPE data fetch.
 	go tokencount.Preload()
@@ -109,7 +118,8 @@ func parseFlags(args []string) (config.Config, error) {
 	fs.StringVar(&cfg.DBPath, "db", config.DefaultDBPath(), "kiro-cli SQLite DB path")
 	fs.StringVar(&cfg.APIKey, "api-key", "", "optional API key for authentication")
 	fs.StringVar(&cfg.KiroAPIKey, "kiro-api-key", "", "Kiro API key (ksk_...) to use instead of the kiro-cli database credential; also KIRO_API_KEY")
-	fs.StringVar(&cfg.KiroAPIRegion, "kiro-api-region", "", "region for Kiro API key auth (default us-east-1); also KIRO_API_REGION")
+	fs.StringVar(&cfg.KiroAPIRegion, "kiro-api-region", "", "region for Kiro API endpoints (runtime.<region>.kiro.dev); overrides the credential's region; also KIRO_API_REGION")
+	fs.BoolVar(&cfg.ModelDiscovery, "model-discovery", true, "fetch Kiro's model catalog at startup so new models resolve without a kirocc update; also KIROCC_MODEL_DISCOVERY")
 	fs.BoolVar(&cfg.Debug, "debug", false, "enable debug logging with OTel JSON Lines output")
 	fs.BoolVar(&cfg.OTel, "otel", false, "enable OpenTelemetry tracing (OTLP HTTP exporter)")
 	fs.IntVar(&cfg.OTelBodyLimit, "otel-body-limit", config.DefaultOTelBodyLimit, "max bytes of request body to capture in OTel spans (0 = unlimited)")
@@ -143,10 +153,69 @@ func buildKiroClient(authMgr *auth.AuthManager, cfg config.Config) kiroclient.Cl
 	if authMgr.UsesAPIKey() {
 		clientOpts = append(clientOpts, kiroclient.WithAPIKeyAuth())
 	}
+	if cfg.KiroAPIRegion != "" {
+		clientOpts = append(clientOpts, kiroclient.WithRegion(cfg.KiroAPIRegion))
+	}
 	if cfg.OTel {
 		clientOpts = append(clientOpts, kiroclient.WithOTel(cfg.OTelBodyLimit))
 	}
 	return kiroclient.NewHTTPClient(clientOpts...)
+}
+
+// modelDiscoveryTimeout bounds the startup catalog fetch. Generous, because it
+// runs in the background and a slow answer costs nothing.
+const modelDiscoveryTimeout = 20 * time.Second
+
+// discoverModels installs Kiro's advertised model catalog as a fallback layer
+// behind the built-in mapping table, so a model Kiro launches after this build
+// resolves with the right context window and effort enum instead of falling
+// through to pass-through defaults. Best-effort: every failure path leaves the
+// built-in tables untouched.
+//
+// It runs in the background because it needs a credential, and blocking startup
+// on a network round trip would delay the listener for no benefit — the built-in
+// table already covers every model shipped with this build.
+func discoverModels(ctx context.Context, authMgr *auth.AuthManager, regionOverride string) {
+	ctx, cancel := context.WithTimeout(ctx, modelDiscoveryTimeout)
+	defer cancel()
+
+	creds, err := authMgr.GetToken(ctx)
+	if err != nil {
+		slog.Debug("model discovery skipped: no credentials", "err", err)
+		return
+	}
+	if creds.ProfileARN == "" {
+		// API keys carry no profile ARN, and the API rejects a request without
+		// one. Nothing to do but keep the built-in table.
+		slog.Debug("model discovery skipped: credential has no profile ARN", "auth_type", creds.AuthType)
+		return
+	}
+	region := creds.Region
+	if regionOverride != "" {
+		region = regionOverride
+	}
+
+	catalog, err := kirocatalog.New().List(ctx, kirocatalog.Request{
+		Token:      creds.AccessToken,
+		Region:     region,
+		ProfileARN: creds.ProfileARN,
+	})
+	if err != nil {
+		slog.Warn("model discovery failed, using built-in model table", "region", region, "err", err)
+		return
+	}
+
+	entries := make([]models.CatalogModel, 0, len(catalog))
+	for _, m := range catalog {
+		entries = append(entries, models.CatalogModel{
+			ID:             m.ID,
+			MaxInputTokens: m.MaxInputTokens,
+			EffortEnum:     m.EffortEnum,
+		})
+	}
+	added := models.SetCatalog(entries)
+	slog.Info("model catalog discovered",
+		"region", region, "advertised", len(catalog), "new_models", added)
 }
 
 func buildServer(authMgr *auth.AuthManager, client kiroclient.Client, cfg config.Config) *server.Server {

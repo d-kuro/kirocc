@@ -12,6 +12,8 @@ Just set `ANTHROPIC_BASE_URL` from any Anthropic API client (e.g., Claude Code) 
 - **Automatic auth management** — Reads credentials from Kiro CLI's SQLite DB with automatic token refresh (Social / OIDC)
 - **Kiro API key authentication** — Alternatively authenticate with a `KIRO_API_KEY` (`ksk_…`) for headless environments (CI, containers) where an interactive Kiro login is not available
 - **Model mapping** — Maps Anthropic model names (e.g., `claude-sonnet-4-6`) to Kiro model names. Customizable via environment variable
+- **Automatic model discovery** — Fetches Kiro's model catalog (`ListAvailableModels`) at startup, so models Kiro launches after a kirocc release resolve with the right context window and effort levels without a code change. Built-in mappings always win; discovery only fills gaps
+- **Custom API region** — Pin the region in `runtime.<region>.kiro.dev` with `-kiro-api-region`, for accounts whose stored credential region is not one Kiro serves
 - **Extended Thinking** — Enable via the `[1m]` suffix, the `thinking` field, or `output_config.effort`. Reasoning depth travels natively as `additionalModelRequestFields.output_config.effort` (validated against each model's enum; defaults to `medium` for effort-capable models when thinking is on without an explicit effort)
 - **Tool Search** — Proxy-side implementation of Anthropic's [Tool Search Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool). Supports `tool_search_tool_regex_20251119` and `tool_search_tool_bm25_20251119` with `defer_loading` for on-demand tool discovery
 - **Prompt Caching** — Converts Anthropic tool-level `cache_control` to Kiro `cachePoint`
@@ -96,23 +98,25 @@ API keys are available for Kiro Pro, Pro+, Pro Max, and Power subscribers. On gr
 
 ### Command-line options
 
-| Flag               | Default                   | Description                                                        |
-| ------------------ | ------------------------- | ------------------------------------------------------------------ |
-| `-port`            | `3456`                    | Listen port                                                        |
-| `-host`            | `127.0.0.1`               | Bind host                                                          |
-| `-db`              | (OS-dependent, see below) | Kiro CLI SQLite DB path                                            |
-| `-api-key`         | (none)                    | API key required to access the proxy                               |
-| `-kiro-api-key`    | (none)                    | Kiro API key (`ksk_…`) for upstream authentication                 |
-| `-kiro-api-region` | `us-east-1`               | Region for Kiro API key authentication                             |
-| `-debug`           | `false`                   | Enable debug logging                                               |
-| `-log-file`        | (none)                    | Write logs to file with rotation (file-only by default)            |
-| `-log-max-size`    | `10`                      | Max log file size in MB before rotation                            |
-| `-log-max-backups` | `5`                       | Max number of old log files to retain                              |
-| `-log-max-age`     | `7`                       | Max days to retain old log files                                   |
-| `-log-compress`    | `false`                   | Compress rotated log files with gzip                               |
-| `-log-console`     | `false`                   | Also write logs to console when `-log-file` is set                 |
-| `-otel`            | `false`                   | Enable OpenTelemetry tracing (OTLP HTTP exporter)                  |
-| `-otel-body-limit` | `32768`                   | Max bytes of request body to capture in OTel spans (0 = unlimited) |
+| Flag                  | Default                   | Description                                                         |
+| --------------------- | ------------------------- | ------------------------------------------------------------------- |
+| `-port`               | `3456`                    | Listen port                                                         |
+| `-host`               | `127.0.0.1`               | Bind host                                                           |
+| `-db`                 | (OS-dependent, see below) | Kiro CLI SQLite DB path                                             |
+| `-api-key`            | (none)                    | API key required to access the proxy                                |
+| `-kiro-api-key`       | (none)                    | Kiro API key (`ksk_…`) to use instead of the Kiro CLI DB credential |
+| `-kiro-api-region`    | (credential's region)     | Region for Kiro API endpoints (`runtime.<region>.kiro.dev`)         |
+| `-model-discovery`    | `true`                    | Fetch Kiro's model catalog at startup                               |
+| `-keepalive-interval` | `15s`                     | SSE idle keep-alive interval (0 = disabled)                         |
+| `-debug`              | `false`                   | Enable debug logging                                                |
+| `-log-file`           | (none)                    | Write logs to file with rotation (file-only by default)             |
+| `-log-max-size`       | `10`                      | Max log file size in MB before rotation                             |
+| `-log-max-backups`    | `5`                       | Max number of old log files to retain                               |
+| `-log-max-age`        | `7`                       | Max days to retain old log files                                    |
+| `-log-compress`       | `false`                   | Compress rotated log files with gzip                                |
+| `-log-console`        | `false`                   | Also write logs to console when `-log-file` is set                  |
+| `-otel`               | `false`                   | Enable OpenTelemetry tracing (OTLP HTTP exporter)                   |
+| `-otel-body-limit`    | `32768`                   | Max bytes of request body to capture in OTel spans (0 = unlimited)  |
 
 #### Default DB path
 
@@ -125,23 +129,58 @@ API keys are available for Kiro Pro, Pro+, Pro Max, and Power subscribers. On gr
 
 Command-line options can be overridden with environment variables.
 
-| Variable                 | Corresponding option |
-| ------------------------ | -------------------- |
-| `KIROCC_PORT`            | `-port`              |
-| `KIROCC_HOST`            | `-host`              |
-| `KIROCC_DB_PATH`         | `-db`                |
-| `KIROCC_API_KEY`         | `-api-key`           |
-| `KIRO_API_KEY`           | `-kiro-api-key`      |
-| `KIRO_API_REGION`        | `-kiro-api-region`   |
-| `KIROCC_DEBUG`           | `-debug`             |
-| `KIROCC_LOG_FILE`        | `-log-file`          |
-| `KIROCC_LOG_MAX_SIZE`    | `-log-max-size`      |
-| `KIROCC_LOG_MAX_BACKUPS` | `-log-max-backups`   |
-| `KIROCC_LOG_MAX_AGE`     | `-log-max-age`       |
-| `KIROCC_LOG_COMPRESS`    | `-log-compress`      |
-| `KIROCC_LOG_CONSOLE`     | `-log-console`       |
-| `KIROCC_OTEL`            | `-otel`              |
-| `KIROCC_OTEL_BODY_LIMIT` | `-otel-body-limit`   |
+| Variable                    | Corresponding option  |
+| --------------------------- | --------------------- |
+| `KIROCC_PORT`               | `-port`               |
+| `KIROCC_HOST`               | `-host`               |
+| `KIROCC_DB_PATH`            | `-db`                 |
+| `KIROCC_API_KEY`            | `-api-key`            |
+| `KIRO_API_KEY`              | `-kiro-api-key`       |
+| `KIRO_API_REGION`           | `-kiro-api-region`    |
+| `KIROCC_MODEL_DISCOVERY`    | `-model-discovery`    |
+| `KIROCC_KEEPALIVE_INTERVAL` | `-keepalive-interval` |
+| `KIROCC_DEBUG`              | `-debug`              |
+| `KIROCC_LOG_FILE`           | `-log-file`           |
+| `KIROCC_LOG_MAX_SIZE`       | `-log-max-size`       |
+| `KIROCC_LOG_MAX_BACKUPS`    | `-log-max-backups`    |
+| `KIROCC_LOG_MAX_AGE`        | `-log-max-age`        |
+| `KIROCC_LOG_COMPRESS`       | `-log-compress`       |
+| `KIROCC_LOG_CONSOLE`        | `-log-console`        |
+| `KIROCC_OTEL`               | `-otel`               |
+| `KIROCC_OTEL_BODY_LIMIT`    | `-otel-body-limit`    |
+
+`KIRO_API_KEY` and `KIRO_API_REGION` intentionally keep Kiro's own names rather than the `KIROCC_` prefix, so a machine already configured for headless kiro-cli needs no kirocc-specific setup.
+
+### Custom API region
+
+Kiro API endpoints are region-scoped: completions go to `runtime.<region>.kiro.dev` and the model catalog to `management.<region>.kiro.dev`. By default the region comes from the Kiro CLI credential (the profile ARN, or the region stored by kiro-cli).
+
+That default is not always a region Kiro serves. kiro-cli records the region you signed in from, and only a few regions have Kiro hosts — `us-east-1`, `eu-central-1`, `us-gov-east-1`, `us-gov-west-1` at the time of writing. If your credential resolves to anything else, the hostname does not exist and every request fails with an upstream error. `-kiro-api-region` pins the region instead:
+
+```bash
+kirocc -kiro-api-region us-east-1
+```
+
+```
+INFO Kiro API region pinned region=us-east-1
+INFO credentials loaded auth_type=idc region=ap-southeast-1
+```
+
+The override applies to the API endpoints only. Token refresh still targets the region that issued the credential, since a token is rejected outside it.
+
+### Automatic model discovery
+
+At startup kirocc calls Kiro's `ListAvailableModels` and installs the result as a fallback layer behind the built-in mapping table. A model Kiro launches after a kirocc release therefore resolves with its real context window and effort enum instead of falling back to pass-through defaults, and shows up in `GET /v1/models`.
+
+Resolution order is `KIROCC_MODEL_MAPPINGS` → built-in table → discovered catalog, first match wins. Built-ins deliberately win: they encode behaviour a mechanically derived entry cannot reproduce, such as which `[1m]` aliases must *not* enable extended thinking and which SKU a 1M request routes to.
+
+Discovery is best-effort and never blocks startup or fails a request. It is skipped when the credential has no profile ARN (which is the case for `-kiro-api-key` auth, since the API requires one), and any error leaves the built-in table in place:
+
+```
+WRN model discovery failed, using built-in model table region=ap-southeast-1 err="..."
+```
+
+Disable it with `-model-discovery=false`.
 
 ### OpenTelemetry tracing
 
@@ -189,6 +228,7 @@ flowchart TB
         MW["Middleware<br/>(OTel Tracing, Trace ID, CORS, API Key Auth)"]
         Handler["Messages Handler"]
         Auth["Auth<br/>(SQLite + Token Refresh)"]
+        Discovery["Model Discovery<br/>(startup)"]
 
         subgraph reqconv ["Request Conversion"]
             direction LR
@@ -213,12 +253,14 @@ flowchart TB
 
     subgraph Kiro ["Kiro API"]
         KiroAPI["runtime.{region}.kiro.dev"]
+        KiroMgmt["management.{region}.kiro.dev<br/>(ListAvailableModels)"]
     end
 
     CC -- "Anthropic Messages API<br/>(JSON / SSE)" --> MW
     MW --> Handler
     Handler --> Auth
     Handler --> reqconv
+    Discovery -- "model catalog<br/>(startup, best-effort)" --> KiroMgmt
     reqconv -- "Kiro Payload<br/>(JSON)" --> KiroAPI
     KiroAPI -- "AWS Event Stream<br/>(binary frames)" --> respconv
     respconv -- "Anthropic SSE / JSON" --> CC
@@ -283,6 +325,7 @@ Per-model allowed effort levels:
 
 - `claude-opus-5`, `claude-opus-4.8`, `claude-opus-4.7`, `claude-sonnet-5`: `low`, `medium`, `high`, `xhigh`, `max`
 - `claude-opus-4.6`, `claude-sonnet-4.6` (and their `-1m` variants): `low`, `medium`, `high`, `max` (no `xhigh`; clamps to `max`)
+- Models not listed here fall back to the enum advertised by [model discovery](#automatic-model-discovery), if any
 - All other models omit `additionalModelRequestFields` entirely
 
 `thinking.budget_tokens` is accepted in the request but no longer affects behavior; reasoning depth is conveyed entirely through `effort`.
