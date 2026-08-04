@@ -130,6 +130,41 @@ func TestGetModels_ContainsDefaultModel(t *testing.T) {
 	}
 }
 
+func TestGetModels_DiscoveryAliasHasDisplayName(t *testing.T) {
+	srv := newTestServer(t, "", nil)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result map[string]any
+	_ = json.UnmarshalRead(resp.Body, &result)
+	data := result["data"].([]any)
+	var alias map[string]any
+	for _, item := range data {
+		m := item.(map[string]any)
+		if m["id"] == "claude-gpt-5.6-sol" {
+			alias = m
+			break
+		}
+		// Canonical Kiro IDs must not carry a display_name.
+		if m["id"] == "gpt-5.6-sol" {
+			if _, ok := m["display_name"]; ok {
+				t.Errorf("canonical gpt-5.6-sol should not have display_name")
+			}
+		}
+	}
+	if alias == nil {
+		t.Fatal("discovery alias claude-gpt-5.6-sol not found in /v1/models")
+	}
+	if alias["display_name"] != "GPT 5.6 Sol" {
+		t.Errorf("display_name = %v, want %q", alias["display_name"], "GPT 5.6 Sol")
+	}
+}
+
 func TestCountTokens(t *testing.T) {
 	srv := newTestServer(t, "", nil)
 	defer srv.Close()
@@ -498,5 +533,56 @@ func TestIsLocalhostOrigin(t *testing.T) {
 				t.Errorf("isLocalhostOrigin(%q) = %v, want %v", tt.origin, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGetModels_GPTModelsListedOnce(t *testing.T) {
+	srv := newTestServer(t, "", nil)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result map[string]any
+	_ = json.UnmarshalRead(resp.Body, &result)
+	data := result["data"].([]any)
+	counts := map[string]int{}
+	for _, item := range data {
+		m := item.(map[string]any)
+		counts[m["id"].(string)]++
+	}
+	for _, id := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		if counts[id] != 1 {
+			t.Errorf("model %q listed %d times, want exactly 1", id, counts[id])
+		}
+	}
+}
+
+func TestCountTokens_GPTModel(t *testing.T) {
+	srv := newTestServer(t, "", nil)
+	defer srv.Close()
+
+	resp, err := http.Post(
+		srv.URL+"/v1/messages/count_tokens",
+		"application/json",
+		strings.NewReader(`{"model":"gpt-5.6-luna","messages":[{"role":"user","content":"hello"}]}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+
+	var result map[string]any
+	_ = json.UnmarshalRead(resp.Body, &result)
+	tokens, ok := result["input_tokens"].(float64)
+	if !ok || tokens <= 0 {
+		t.Fatalf("input_tokens = %v, want > 0", result["input_tokens"])
 	}
 }

@@ -17,12 +17,16 @@ func (s *Server) handleModels(w http.ResponseWriter, _ *http.Request) {
 	data := make([]any, 0, len(modelList))
 	now := time.Now().Unix()
 	for _, m := range modelList {
-		data = append(data, map[string]any{
-			"id":       m,
+		entry := map[string]any{
+			"id":       m.ID,
 			"object":   "model",
 			"created":  now,
 			"owned_by": "kiro",
-		})
+		}
+		if m.DisplayName != "" {
+			entry["display_name"] = m.DisplayName
+		}
+		data = append(data, entry)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"object": "list",

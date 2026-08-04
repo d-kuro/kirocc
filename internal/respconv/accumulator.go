@@ -56,6 +56,9 @@ type responseAccumulator struct {
 	Credits    float64
 	// Signature from reasoningContentEvent.
 	Signature string
+	// Redacted reasoning blobs from reasoningContentEvent (GPT 5.6). Kept as
+	// separate blocks; base64 blobs must never be concatenated.
+	RedactedContents []string
 	// Conversation metadata.
 	ConversationID string
 	// Text presence.
@@ -96,14 +99,15 @@ func newAccumulator(contextWindowSize int, stopSequences []string, maxTokens int
 	return acc
 }
 
-// IsEmptyVisibleEndTurn reports whether the response completed with thinking
-// content but no visible text and no tool use. This indicates the upstream model
-// produced only a thinking block and the client would see an empty response.
+// IsEmptyVisibleEndTurn reports whether the response completed with reasoning
+// content (thinking text or redacted blobs) but no visible text and no tool
+// use — the client would see an empty response, so the caller retries.
 func (a *responseAccumulator) IsEmptyVisibleEndTurn() bool {
 	if a.LocalStop {
 		return false // stop_sequence/max_tokens are not empty-response cases
 	}
-	return a.ThinkingBuf.Len() > 0 && a.TextBuf.Len() == 0 && !a.HasToolUse
+	hasReasoning := a.ThinkingBuf.Len() > 0 || len(a.RedactedContents) > 0
+	return hasReasoning && a.TextBuf.Len() == 0 && !a.HasToolUse
 }
 
 // accumulateThinking applies max_tokens budget to thinking content and writes to ThinkingBuf.

@@ -271,6 +271,64 @@ func TestResolve(t *testing.T) {
 			wantAnthropicModel: "claude-sonnet-4-6",
 		},
 		{
+			name:               "gpt-5.6-sol resolves with 272k window",
+			model:              "gpt-5.6-sol",
+			wantKiroModel:      "gpt-5.6-sol",
+			wantContextWindow:  272_000,
+			wantAnthropicModel: "gpt-5.6-sol",
+		},
+		{
+			name:               "gpt-5.6-terra resolves with 272k window",
+			model:              "gpt-5.6-terra",
+			wantKiroModel:      "gpt-5.6-terra",
+			wantContextWindow:  272_000,
+			wantAnthropicModel: "gpt-5.6-terra",
+		},
+		{
+			name:               "gpt-5.6-luna resolves with 272k window",
+			model:              "gpt-5.6-luna",
+			wantKiroModel:      "gpt-5.6-luna",
+			wantContextWindow:  272_000,
+			wantAnthropicModel: "gpt-5.6-luna",
+		},
+		{
+			name:               "gpt-5.6-sol[1m] does not match and falls back to default",
+			model:              "gpt-5.6-sol[1m]",
+			wantThinking:       true,
+			wantKiroModel:      DefaultModel,
+			wantContextWindow:  DefaultContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-4-6",
+		},
+		{
+			name:               "claude-gpt-5.6-sol discovery alias resolves to gpt-5.6-sol",
+			model:              "claude-gpt-5.6-sol",
+			wantKiroModel:      "gpt-5.6-sol",
+			wantContextWindow:  272_000,
+			wantAnthropicModel: "claude-gpt-5.6-sol",
+		},
+		{
+			name:               "claude-gpt-5.6-terra discovery alias resolves to gpt-5.6-terra",
+			model:              "claude-gpt-5.6-terra",
+			wantKiroModel:      "gpt-5.6-terra",
+			wantContextWindow:  272_000,
+			wantAnthropicModel: "claude-gpt-5.6-terra",
+		},
+		{
+			name:               "claude-gpt-5.6-luna discovery alias resolves to gpt-5.6-luna",
+			model:              "claude-gpt-5.6-luna",
+			wantKiroModel:      "gpt-5.6-luna",
+			wantContextWindow:  272_000,
+			wantAnthropicModel: "claude-gpt-5.6-luna",
+		},
+		{
+			name:               "claude-gpt-5.6-sol[1m] falls back to default instead of claude passthrough",
+			model:              "claude-gpt-5.6-sol[1m]",
+			wantThinking:       true,
+			wantKiroModel:      DefaultModel,
+			wantContextWindow:  DefaultContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-4-6",
+		},
+		{
 			name:               "env override custom model",
 			envMappings:        `[{"anthropic":"my-custom-model","kiro":"claude-custom-1"}]`,
 			model:              "my-custom-model",
@@ -330,7 +388,7 @@ func TestListModels(t *testing.T) {
 	tests := []struct {
 		name        string
 		envMappings string
-		checkModel  string // if set, verify this model is in the list
+		checkModel  string // if set, verify this model ID is in the list
 	}{
 		{
 			name:       "default models are deduplicated and contain DefaultModel",
@@ -343,6 +401,14 @@ func TestListModels(t *testing.T) {
 		{
 			name:       "claude-opus-5 is listed exactly once (both alias rows dedupe to one Kiro value)",
 			checkModel: "claude-opus-5",
+		},
+		{
+			name:       "canonical GPT ID is listed",
+			checkModel: "gpt-5.6-sol",
+		},
+		{
+			name:       "GPT discovery alias is listed alongside the canonical ID",
+			checkModel: "claude-gpt-5.6-sol",
 		},
 		{
 			name:        "env override model included",
@@ -366,17 +432,46 @@ func TestListModels(t *testing.T) {
 
 			// Check deduplication
 			seen := make(map[string]bool)
+			var ids []string
 			for _, m := range result {
-				if seen[m] {
-					t.Errorf("ListModels returned duplicate: %q", m)
+				if seen[m.ID] {
+					t.Errorf("ListModels returned duplicate: %q", m.ID)
 				}
-				seen[m] = true
+				seen[m.ID] = true
+				ids = append(ids, m.ID)
 			}
 
-			if tt.checkModel != "" && !slices.Contains(result, tt.checkModel) {
+			if tt.checkModel != "" && !slices.Contains(ids, tt.checkModel) {
 				t.Errorf("ListModels missing expected model %q", tt.checkModel)
 			}
 		})
+	}
+}
+
+func TestListModels_DiscoveryAliasDisplayNames(t *testing.T) {
+	t.Setenv("KIROCC_MODEL_MAPPINGS", "")
+
+	wantNames := map[string]string{
+		"claude-gpt-5.6-sol":   "GPT 5.6 Sol",
+		"claude-gpt-5.6-terra": "GPT 5.6 Terra",
+		"claude-gpt-5.6-luna":  "GPT 5.6 Luna",
+		// Canonical IDs carry no display name.
+		"gpt-5.6-sol":   "",
+		"claude-opus-5": "",
+	}
+	got := make(map[string]string)
+	for _, m := range ListModels() {
+		got[m.ID] = m.DisplayName
+	}
+	for id, want := range wantNames {
+		name, ok := got[id]
+		if !ok {
+			t.Errorf("ListModels missing %q", id)
+			continue
+		}
+		if name != want {
+			t.Errorf("ListModels %q display name = %q, want %q", id, name, want)
+		}
 	}
 }
 
@@ -390,5 +485,34 @@ func TestMapping_FieldNames(t *testing.T) {
 	}
 	if m.Kiro1M != "claude-test-kiro-1m" {
 		t.Errorf("Kiro1M = %q, want %q", m.Kiro1M, "claude-test-kiro-1m")
+	}
+}
+
+func TestIsReasoningModel_EnvAliasToGPT(t *testing.T) {
+	// An env alias must inherit the intrinsic capability of its resolved Kiro
+	// model instead of carrying a second, potentially inconsistent style value.
+	t.Setenv("KIROCC_MODEL_MAPPINGS", `[{"anthropic":"my-gpt","kiro":"gpt-5.6-sol","context_window_size":272000}]`)
+
+	kiroModel, _, _, _ := Resolve("my-gpt", false)
+	if kiroModel != "gpt-5.6-sol" {
+		t.Fatalf("Resolve(my-gpt) kiroModel = %q, want gpt-5.6-sol", kiroModel)
+	}
+	if !IsReasoningModel(kiroModel) {
+		t.Fatalf("IsReasoningModel(%q) = false, want true", kiroModel)
+	}
+}
+
+func TestResolve_EnvAliasToGPT_SuffixStillRejected(t *testing.T) {
+	// The tier-2 [1m]-strip exclusion is judged by the resolved Kiro model's
+	// intrinsic capability, so an env alias to a GPT model inherits it. Both
+	// the canonical ID and the alias must reject the suffix and fall through
+	// to the default fallback.
+	t.Setenv("KIROCC_MODEL_MAPPINGS", `[{"anthropic":"my-gpt","kiro":"gpt-5.6-sol","context_window_size":272000}]`)
+
+	for _, model := range []string{"gpt-5.6-sol[1m]", "my-gpt[1m]"} {
+		kiroModel, _, _, _ := Resolve(model, false)
+		if kiroModel != DefaultModel {
+			t.Errorf("Resolve(%q) kiroModel = %q, want default fallback %q", model, kiroModel, DefaultModel)
+		}
 	}
 }

@@ -2,6 +2,7 @@ package respconv
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/d-kuro/kirocc/internal/kiroproto"
@@ -674,5 +675,87 @@ func TestAccumulator_IsEmptyVisibleEndTurn(t *testing.T) {
 				t.Errorf("IsEmptyVisibleEndTurn() = %v, want %v", got, tt.expect)
 			}
 		})
+	}
+}
+
+func TestAccumulator_RedactedContentCountsTowardUsage(t *testing.T) {
+	a := newAccumulator(272000, nil, 0, 100)
+	a.ProcessEvent(kiroproto.Event{Type: kiroproto.EventReasoningContent, RedactedContent: strings.Repeat("A", 400)})
+
+	in, out := a.resolvedUsage()
+	if in != 100 {
+		t.Fatalf("input = %d, want pre-counted 100", in)
+	}
+	if out < 1 {
+		t.Fatalf("output = %d, want >= 1 (redacted blob must count toward estimated output)", out)
+	}
+}
+
+func TestAccumulator_RedactedContentCountsTowardMaxTokensBudget(t *testing.T) {
+	// 2-token budget = 8 runes; a 400-rune blob exceeds it. The blob is never
+	// truncated (opaque base64) but must trip the budget like tool input does.
+	a := newAccumulator(272000, nil, 2, 0)
+	a.ProcessEvent(kiroproto.Event{Type: kiroproto.EventReasoningContent, RedactedContent: strings.Repeat("A", 400)})
+
+	if !a.LocalStop {
+		t.Fatal("expected LocalStop after blob exceeds max_tokens budget")
+	}
+	if a.StopReason != StopReasonMaxTokens {
+		t.Fatalf("StopReason = %q, want max_tokens", a.StopReason)
+	}
+	if len(a.RedactedContents) != 1 || len(a.RedactedContents[0]) != 400 {
+		t.Fatal("blob must be stored untruncated")
+	}
+}
+
+func TestAccumulator_RedactedContentReportsMaxTokensStop(t *testing.T) {
+	tests := []struct {
+		name           string
+		data           string
+		wantStopSignal bool
+	}{
+		{
+			name: "below budget",
+			data: strings.Repeat("A", 7),
+		},
+		{
+			name:           "at budget",
+			data:           strings.Repeat("A", 8),
+			wantStopSignal: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newAccumulator(272000, nil, 2, 0)
+			delta := a.ProcessEvent(kiroproto.Event{
+				Type:            kiroproto.EventReasoningContent,
+				RedactedContent: tt.data,
+			})
+
+			if delta.StopSignal != tt.wantStopSignal {
+				t.Fatalf("StopSignal = %v, want %v", delta.StopSignal, tt.wantStopSignal)
+			}
+			if tt.wantStopSignal && delta.StopReason != StopReasonMaxTokens {
+				t.Fatalf("StopReason = %q, want %q", delta.StopReason, StopReasonMaxTokens)
+			}
+		})
+	}
+}
+
+func TestAccumulator_TrailingBlobDoesNotOverrideStopSequence(t *testing.T) {
+	// A stop_sequence hit latches the stop reason; a trailing redacted blob
+	// that overruns the max_tokens budget afterwards must not overwrite it
+	// (first-wins), or the client would lose the stop_sequence value.
+	a := newAccumulator(272000, []string{"STOP"}, 2, 0)
+	a.ProcessEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "hi STOP"})
+	if !a.LocalStop || a.StopReason != StopReasonStopSequence {
+		t.Fatalf("precondition: LocalStop=%v StopReason=%q, want stop_sequence latch", a.LocalStop, a.StopReason)
+	}
+
+	a.ProcessEvent(kiroproto.Event{Type: kiroproto.EventReasoningContent, RedactedContent: strings.Repeat("A", 400)})
+
+	if a.StopReason != StopReasonStopSequence {
+		t.Fatalf("StopReason = %q, want stop_sequence to survive the trailing blob", a.StopReason)
 	}
 }

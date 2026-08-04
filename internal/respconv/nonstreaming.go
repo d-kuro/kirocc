@@ -63,6 +63,11 @@ func (n *NonStreamingAccumulator) ThinkingLen() int {
 	return n.acc.ThinkingBuf.Len()
 }
 
+// RedactedContents returns the redacted reasoning blobs accumulated so far.
+func (n *NonStreamingAccumulator) RedactedContents() []string {
+	return n.acc.RedactedContents
+}
+
 // Credits returns the per-response credit consumption from meteringEvent.
 // The bool is false if no meteringEvent was received.
 func (n *NonStreamingAccumulator) Credits() (float64, bool) {
@@ -116,6 +121,15 @@ func buildResponseFromAcc(acc *responseAccumulator, model string) (map[string]an
 			"id":    tc.ID,
 			"name":  tc.Name,
 			"input": input,
+		})
+	}
+	// Redacted reasoning blobs (GPT 5.6) arrive after text/tool_use in the
+	// upstream stream, so they close the content array — matching the
+	// streaming emission order. One block per blob, never concatenated.
+	for _, rc := range acc.RedactedContents {
+		content = append(content, map[string]any{
+			"type": anthropic.BlockTypeRedactedThinking,
+			"data": rc,
 		})
 	}
 

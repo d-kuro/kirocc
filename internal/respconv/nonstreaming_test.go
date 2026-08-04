@@ -6,6 +6,61 @@ import (
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 )
 
+func TestBuildNonStreamingResponse_RedactedThinking(t *testing.T) {
+	// GPT 5.6 order: tool_use / text stream first, redacted blob arrives last.
+	events := []kiroproto.Event{
+		{Type: "toolUseEvent", ToolStop: true, ToolUseID: "call_1", ToolName: "read", ToolInput: `{"path":"/tmp"}`},
+		{Type: kiroproto.EventReasoningContent, RedactedContent: "blob-abc"},
+		{Type: "metadataEvent", InputTokens: 10, OutputTokens: 5},
+	}
+	resp, _ := BuildNonStreamingResponse(events, "gpt-5.6-sol", 272000, nil, 0, 0)
+	content := resp["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("content len = %d, want 2 (tool_use + redacted_thinking): %v", len(content), content)
+	}
+	tu := content[0].(map[string]any)
+	if tu["type"] != "tool_use" || tu["id"] != "call_1" {
+		t.Fatalf("first block = %v, want tool_use call_1", tu)
+	}
+	rt := content[1].(map[string]any)
+	if rt["type"] != "redacted_thinking" || rt["data"] != "blob-abc" {
+		t.Fatalf("second block = %v, want redacted_thinking blob-abc", rt)
+	}
+	if resp["stop_reason"] != "tool_use" {
+		t.Fatalf("stop_reason = %v, want tool_use", resp["stop_reason"])
+	}
+}
+
+func TestBuildNonStreamingResponse_MultipleRedactedBlobs(t *testing.T) {
+	// Multiple blobs must stay separate blocks, never concatenated.
+	events := []kiroproto.Event{
+		{Type: kiroproto.EventReasoningContent, RedactedContent: "blob-1"},
+		{Type: "assistantResponseEvent", Content: "hi"},
+		{Type: kiroproto.EventReasoningContent, RedactedContent: "blob-2"},
+	}
+	resp, _ := BuildNonStreamingResponse(events, "gpt-5.6-sol", 272000, nil, 0, 0)
+	content := resp["content"].([]any)
+	var datas []string
+	for _, c := range content {
+		b := c.(map[string]any)
+		if b["type"] == "redacted_thinking" {
+			datas = append(datas, b["data"].(string))
+		}
+	}
+	if len(datas) != 2 || datas[0] != "blob-1" || datas[1] != "blob-2" {
+		t.Fatalf("redacted blobs = %v, want [blob-1 blob-2]", datas)
+	}
+}
+
+func TestNonStreamingAccumulator_RedactedOnlyIsEmptyVisible(t *testing.T) {
+	// A redacted-only response has no visible output → retry contract holds.
+	acc := NewNonStreamingAccumulator(272000, nil, 0, 0)
+	acc.ProcessEvent(kiroproto.Event{Type: kiroproto.EventReasoningContent, RedactedContent: "blob-only"})
+	if !acc.IsEmptyVisibleEndTurn() {
+		t.Fatal("redacted-only response must be treated as empty visible end_turn")
+	}
+}
+
 func TestBuildNonStreamingResponse_TextOnly(t *testing.T) {
 	events := []kiroproto.Event{
 		{Type: "assistantResponseEvent", Content: "Hello"},

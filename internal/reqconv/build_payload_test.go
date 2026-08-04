@@ -229,6 +229,168 @@ func TestBuildPayload_NoThinkingXMLInjected(t *testing.T) {
 	}
 }
 
+func TestBuildPayload_EffortReasoningStyle(t *testing.T) {
+	req := &anthropic.Request{
+		Model: "gpt-5.6-sol",
+		Messages: []anthropic.Message{
+			{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
+		},
+	}
+	payload, _, err := BuildPayload(req, BuildOptions{ModelID: "gpt-5.6-sol", ConversationID: "conv-test", Effort: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	amrf := payload.AdditionalModelRequestFields
+	if amrf == nil || amrf.Reasoning == nil {
+		t.Fatal("expected additionalModelRequestFields.reasoning")
+	}
+	if amrf.Reasoning.Effort != "none" {
+		t.Fatalf("effort = %q, want none", amrf.Reasoning.Effort)
+	}
+	if amrf.OutputConfig != nil {
+		t.Fatalf("output_config must not be set for reasoning style, got %+v", amrf.OutputConfig)
+	}
+}
+
+func TestBuildPayload_EffortSchemaFollowsModel(t *testing.T) {
+	tests := []struct {
+		name          string
+		modelID       string
+		effort        string
+		wantReasoning bool
+	}{
+		{
+			name:          "GPT model uses reasoning schema",
+			modelID:       "gpt-5.6-sol",
+			effort:        "none",
+			wantReasoning: true,
+		},
+		{
+			name:    "Claude model uses output_config schema",
+			modelID: "claude-opus-4.8",
+			effort:  "high",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &anthropic.Request{
+				Messages: []anthropic.Message{{
+					Role:    "user",
+					Content: anthropic.MessageContent{Text: "Hello"},
+				}},
+			}
+			payload, _, err := BuildPayload(req, BuildOptions{
+				ModelID: tt.modelID,
+				Effort:  tt.effort,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			fields := payload.AdditionalModelRequestFields
+			if fields == nil {
+				t.Fatal("additionalModelRequestFields is nil")
+			}
+			if got := fields.Reasoning != nil; got != tt.wantReasoning {
+				t.Fatalf("reasoning present = %v, want %v", got, tt.wantReasoning)
+			}
+			if got := fields.OutputConfig != nil; got == tt.wantReasoning {
+				t.Fatalf("output_config present = %v, want %v", got, !tt.wantReasoning)
+			}
+		})
+	}
+}
+
+func TestBuildPayload_RedactedThinkingReplay(t *testing.T) {
+	// Tool-use continuation: assistant tool_use + redacted_thinking, then user tool_result.
+	req := &anthropic.Request{
+		Model: "gpt-5.6-sol",
+		Tools: []anthropic.Tool{{Name: "read", InputSchema: map[string]any{"type": "object"}}},
+		Messages: []anthropic.Message{
+			{Role: "user", Content: anthropic.MessageContent{Text: "count files"}},
+			{
+				Role: "assistant",
+				Content: anthropic.MessageContent{
+					Blocks: []anthropic.ContentBlock{
+						{Type: anthropic.BlockTypeRedactedThinking, Data: "blob-abc"},
+						{Type: anthropic.BlockTypeToolUse, ID: "call_1", Name: "read", Input: map[string]any{"path": "/tmp"}},
+					},
+				},
+			},
+			{
+				Role: "user",
+				Content: anthropic.MessageContent{
+					Blocks: []anthropic.ContentBlock{
+						{Type: anthropic.BlockTypeToolResult, ToolUseID: "call_1", Content: anthropic.MessageContent{Text: "11 files"}},
+					},
+				},
+			},
+		},
+	}
+	payload, _, err := BuildPayload(req, BuildOptions{ModelID: "gpt-5.6-sol", ConversationID: "conv-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := payload.ConversationState.History
+	var arm *kiroproto.AssistantResponseMessage
+	for _, h := range history {
+		if h.AssistantResponseMessage != nil && len(h.AssistantResponseMessage.ToolUses) > 0 {
+			arm = h.AssistantResponseMessage
+		}
+	}
+	if arm == nil {
+		t.Fatal("assistant history entry with toolUses not found")
+	}
+	if arm.ReasoningContent == nil || arm.ReasoningContent.RedactedContent != "blob-abc" {
+		t.Fatalf("reasoningContent = %+v, want redactedContent blob-abc", arm.ReasoningContent)
+	}
+	// The blob must not leak into the text content.
+	if strings.Contains(arm.Content, "redacted") || strings.Contains(arm.Content, "blob-abc") {
+		t.Fatalf("content polluted by redacted block: %q", arm.Content)
+	}
+}
+
+func TestBuildPayload_RedactedThinkingOmittedOnCompletedTurn(t *testing.T) {
+	// Completed turn: assistant answered with text after the tool round.
+	// The old blob must NOT be replayed anymore.
+	req := &anthropic.Request{
+		Model: "gpt-5.6-sol",
+		Tools: []anthropic.Tool{{Name: "read", InputSchema: map[string]any{"type": "object"}}},
+		Messages: []anthropic.Message{
+			{Role: "user", Content: anthropic.MessageContent{Text: "count files"}},
+			{
+				Role: "assistant",
+				Content: anthropic.MessageContent{
+					Blocks: []anthropic.ContentBlock{
+						{Type: anthropic.BlockTypeRedactedThinking, Data: "blob-old"},
+						{Type: anthropic.BlockTypeToolUse, ID: "call_1", Name: "read", Input: map[string]any{}},
+					},
+				},
+			},
+			{
+				Role: "user",
+				Content: anthropic.MessageContent{
+					Blocks: []anthropic.ContentBlock{
+						{Type: anthropic.BlockTypeToolResult, ToolUseID: "call_1", Content: anthropic.MessageContent{Text: "11"}},
+					},
+				},
+			},
+			{Role: "assistant", Content: anthropic.MessageContent{Text: "11 files."}},
+			{Role: "user", Content: anthropic.MessageContent{Text: "thanks, next question"}},
+		},
+	}
+	payload, _, err := BuildPayload(req, BuildOptions{ModelID: "gpt-5.6-sol", ConversationID: "conv-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, h := range payload.ConversationState.History {
+		if h.AssistantResponseMessage != nil && h.AssistantResponseMessage.ReasoningContent != nil {
+			t.Fatalf("history[%d] must not carry reasoningContent on a completed turn: %+v", i, h.AssistantResponseMessage.ReasoningContent)
+		}
+	}
+}
+
 func TestBuildPayload_EffortNative(t *testing.T) {
 	req := &anthropic.Request{
 		Model: "claude-opus-4-8",
@@ -788,4 +950,78 @@ func containsStr(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestBuildPayload_RedactedThinkingReplay_PicksLastBlob(t *testing.T) {
+	// Tool-search rounds can leave intermediate-round blobs before the final
+	// round's blob in one assistant message. The blob answering the in-flight
+	// tool round arrives last, so replay must pick the LAST blob attributed
+	// to the answered round.
+	req := &anthropic.Request{
+		Model: "gpt-5.6-sol",
+		Tools: []anthropic.Tool{{Name: "read", InputSchema: map[string]any{"type": "object"}}},
+		Messages: []anthropic.Message{
+			{Role: "user", Content: anthropic.MessageContent{Text: "read the file"}},
+			{Role: "assistant", Content: anthropic.MessageContent{Blocks: []anthropic.ContentBlock{
+				{Type: anthropic.BlockTypeRedactedThinking, Data: "stale-round-blob"},
+				{Type: anthropic.BlockTypeToolUse, ID: "call_2", Name: "read", Input: map[string]any{"path": "/tmp"}},
+				{Type: anthropic.BlockTypeRedactedThinking, Data: "current-round-blob"},
+			}}},
+			{Role: "user", Content: anthropic.MessageContent{Blocks: []anthropic.ContentBlock{
+				{Type: anthropic.BlockTypeToolResult, ToolUseID: "call_2", Content: anthropic.MessageContent{Text: "ok"}},
+			}}},
+		},
+	}
+	payload, _, err := BuildPayload(req, BuildOptions{ModelID: "gpt-5.6-sol"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, h := range payload.ConversationState.History {
+		arm := h.AssistantResponseMessage
+		if arm == nil || len(arm.ToolUses) == 0 {
+			continue
+		}
+		found = true
+		if arm.ReasoningContent == nil {
+			t.Fatal("reasoningContent not replayed")
+		}
+		if got := arm.ReasoningContent.RedactedContent; got != "current-round-blob" {
+			t.Fatalf("replayed blob = %q, want current-round-blob (the last one)", got)
+		}
+	}
+	if !found {
+		t.Fatal("assistant history entry with toolUses not found")
+	}
+}
+
+func TestBuildPayload_RedactedThinkingReplay_SkipsToolSearchRoundBlob(t *testing.T) {
+	// A tool-search round's blob belongs to its server_tool_use, whose
+	// reasoning the backend already consumed. When the final tool round has
+	// no blob of its own, nothing must be replayed — sending the stale
+	// tool-search blob against the final round would be rejected upstream.
+	req := &anthropic.Request{
+		Model: "gpt-5.6-sol",
+		Tools: []anthropic.Tool{{Name: "read", InputSchema: map[string]any{"type": "object"}}},
+		Messages: []anthropic.Message{
+			{Role: "user", Content: anthropic.MessageContent{Text: "read the file"}},
+			{Role: "assistant", Content: anthropic.MessageContent{Blocks: []anthropic.ContentBlock{
+				{Type: anthropic.BlockTypeRedactedThinking, Data: "tool-search-round-blob"},
+				{Type: anthropic.BlockTypeServerToolUse, ID: "srvtoolu_1", Name: "tool_search", Input: map[string]any{"query": "read"}},
+				{Type: anthropic.BlockTypeToolUse, ID: "call_9", Name: "read", Input: map[string]any{"path": "/tmp"}},
+			}}},
+			{Role: "user", Content: anthropic.MessageContent{Blocks: []anthropic.ContentBlock{
+				{Type: anthropic.BlockTypeToolResult, ToolUseID: "call_9", Content: anthropic.MessageContent{Text: "ok"}},
+			}}},
+		},
+	}
+	payload, _, err := BuildPayload(req, BuildOptions{ModelID: "gpt-5.6-sol"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, h := range payload.ConversationState.History {
+		if arm := h.AssistantResponseMessage; arm != nil && arm.ReasoningContent != nil {
+			t.Fatalf("history[%d] replayed a stale tool-search blob: %+v", i, arm.ReasoningContent)
+		}
+	}
 }

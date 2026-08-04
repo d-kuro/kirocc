@@ -14,6 +14,7 @@ import (
 	"github.com/d-kuro/kirocc/internal/httpx"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 	"github.com/d-kuro/kirocc/internal/logging"
+	"github.com/d-kuro/kirocc/internal/models"
 	"github.com/d-kuro/kirocc/internal/reqconv"
 	"github.com/d-kuro/kirocc/internal/respconv"
 	"github.com/d-kuro/kirocc/internal/toolsearch"
@@ -82,6 +83,7 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, session *s
 
 	sw := respconv.NewSSEWriter(ctx, session, o.responseModel, o.contextWindowSize, o.req.StopSequences, o.req.MaxTokens, 0)
 	sw.OnVisibleOutput = session.Promote
+	sw.SetDrainOnStop(models.IsReasoningModel(o.buildOpts.ModelID))
 
 	msgs := slices.Clone(o.req.Messages)
 
@@ -165,6 +167,13 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, session *s
 			}
 			if !shouldStop {
 				return false
+			}
+			// Upstream error frames terminate as errors even when a local
+			// stop is already latched (e.g. an exception arriving mid-drain
+			// after a GPT tool-use max_tokens stop).
+			if e.Type == kiroproto.EventException || e.Type == kiroproto.EventInvalidState {
+				streamErr = true
+				return true
 			}
 			if sw.LocalStop() {
 				localStop = true
@@ -251,7 +260,7 @@ func (o *toolSearchOrchestrator) handleStreaming(ctx context.Context, session *s
 			return ""
 		}
 
-		msgs = o.appendSearchMessages(msgs, srvToolUseID, searchInput, results, searchErr, nameMap)
+		msgs = o.appendSearchMessages(msgs, srvToolUseID, searchInput, results, searchErr, nameMap, sw.RedactedContents())
 	}
 
 	// Max rounds reached without normal completion.
@@ -387,7 +396,7 @@ func (o *toolSearchOrchestrator) handleNonStreaming(ctx context.Context, w http.
 			})
 		}
 
-		msgs = o.appendSearchMessages(msgs, srvToolUseID, searchInput, results, searchErr, nameMap)
+		msgs = o.appendSearchMessages(msgs, srvToolUseID, searchInput, results, searchErr, nameMap, acc.RedactedContents())
 	}
 
 	// Max rounds reached without normal completion.
@@ -437,7 +446,10 @@ func (o *toolSearchOrchestrator) executeSearch(ctx context.Context, short string
 // appendSearchMessages appends the server_tool_use + tool_result messages to the conversation.
 // On error, the tool_result contains the error message instead of tool references.
 // Tool names in the result text are shortened via nameMap so Kiro sees consistent names.
-func (o *toolSearchOrchestrator) appendSearchMessages(msgs []anthropic.Message, srvToolUseID string, searchInput map[string]any, results []string, searchErr error, nameMap *reqconv.ToolNameMap) []anthropic.Message {
+// redacted carries the round's redacted reasoning blobs (GPT 5.6); they are
+// replayed as redacted_thinking blocks so buildHistory can attach the blob to
+// the in-flight tool round in the next request.
+func (o *toolSearchOrchestrator) appendSearchMessages(msgs []anthropic.Message, srvToolUseID string, searchInput map[string]any, results []string, searchErr error, nameMap *reqconv.ToolNameMap, redacted []string) []anthropic.Message {
 	var resultContent anthropic.MessageContent
 	var isError bool
 	if searchErr != nil {
@@ -451,12 +463,15 @@ func (o *toolSearchOrchestrator) appendSearchMessages(msgs []anthropic.Message, 
 		}
 		resultContent = anthropic.MessageContent{Text: "Found tools: " + strings.Join(shortened, ", ")}
 	}
+	assistantBlocks := make([]anthropic.ContentBlock, 0, len(redacted)+1)
+	for _, data := range redacted {
+		assistantBlocks = append(assistantBlocks, anthropic.ContentBlock{Type: anthropic.BlockTypeRedactedThinking, Data: data})
+	}
+	assistantBlocks = append(assistantBlocks, anthropic.ContentBlock{Type: anthropic.BlockTypeServerToolUse, ID: srvToolUseID, Name: toolsearch.KiroToolSearchName, Input: searchInput})
 	return append(msgs,
 		anthropic.Message{
-			Role: "assistant",
-			Content: anthropic.MessageContent{Blocks: []anthropic.ContentBlock{
-				{Type: anthropic.BlockTypeServerToolUse, ID: srvToolUseID, Name: toolsearch.KiroToolSearchName, Input: searchInput},
-			}},
+			Role:    "assistant",
+			Content: anthropic.MessageContent{Blocks: assistantBlocks},
 		},
 		anthropic.Message{
 			Role: "user",
