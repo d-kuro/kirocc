@@ -17,6 +17,21 @@ type Mapping struct {
 
 const ThinkingSuffix = "[1m]"
 
+// normalizeThinkingSuffix canonicalizes the trailing 1M context marker while
+// leaving the model ID itself untouched. Claude Code emits both `[1m]` and
+// `[1M]` depending on the call path; Kiro model IDs are case-sensitive and
+// must never receive either suffix.
+func normalizeThinkingSuffix(model string) string {
+	if len(model) < len(ThinkingSuffix) {
+		return model
+	}
+	suffixStart := len(model) - len(ThinkingSuffix)
+	if strings.EqualFold(model[suffixStart:], ThinkingSuffix) {
+		return model[:suffixStart] + ThinkingSuffix
+	}
+	return model
+}
+
 // Context window sizes.
 const (
 	DefaultContextWindowSize  = 200_000
@@ -27,10 +42,12 @@ const (
 // Uses exact key matching against both Anthropic and Kiro fields (first match wins).
 // Order matters: specific entries must precede legacy aliases that share the same Kiro value.
 var modelMapOrdered = []Mapping{
+	{Anthropic: "claude-opus-5[1m]", Kiro: "claude-opus-5", Kiro1M: "claude-opus-5"},
 	{Anthropic: "claude-opus-4-8[1m]", Kiro: "claude-opus-4.8", Kiro1M: "claude-opus-4.8"},
 	{Anthropic: "claude-opus-4-7[1m]", Kiro: "claude-opus-4.7", Kiro1M: "claude-opus-4.7"},
 	{Anthropic: "claude-opus-4-6[1m]", Kiro: "claude-opus-4.6", Kiro1M: "claude-opus-4.6"},
 	{Anthropic: "claude-sonnet-5[1m]", Kiro: "claude-sonnet-5", Kiro1M: "claude-sonnet-5"},
+	{Anthropic: "claude-opus-5", Kiro: "claude-opus-5", Kiro1M: "claude-opus-5"},
 	{Anthropic: "claude-opus-4-8", Kiro: "claude-opus-4.8", Kiro1M: "claude-opus-4.8"},
 	{Anthropic: "claude-opus-4-7", Kiro: "claude-opus-4.7", Kiro1M: "claude-opus-4.7"},
 	{Anthropic: "claude-sonnet-5", Kiro: "claude-sonnet-5", Kiro1M: "claude-sonnet-5"},
@@ -117,6 +134,8 @@ func effectiveMappings() []Mapping {
 // Upstream `kiroModel` is never `[1m]`-suffixed — it always comes from
 // mapping tables. KIROCC_MODEL_MAPPINGS env var can override mappings.
 func Resolve(model string, context1M bool) (kiroModel string, thinking bool, contextWindowSize int, anthropicModel string) {
+	model = normalizeThinkingSuffix(model)
+
 	var matchedWindowSize int
 	var matchedKiro1M string
 	var matchedAnthropic string
