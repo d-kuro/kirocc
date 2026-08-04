@@ -13,6 +13,12 @@ type Mapping struct {
 	Kiro              string `json:"kiro"`
 	Kiro1M            string `json:"kiro_1m,omitempty"`
 	ContextWindowSize int    `json:"context_window_size,omitzero"` // 0 means use default
+	// DisplayName, when set, additionally advertises the Anthropic ID in
+	// /v1/models with this display_name. Used for discovery aliases: Claude
+	// Code's gateway model discovery drops IDs not starting with
+	// claude/anthropic, so non-claude upstream models need a claude- prefixed
+	// alias to appear in the model picker.
+	DisplayName string `json:"display_name,omitempty"`
 }
 
 const ThinkingSuffix = "[1m]"
@@ -56,6 +62,17 @@ var modelMapOrdered = []Mapping{
 	{Anthropic: "claude-opus-4-6", Kiro: "claude-opus-4.6", Kiro1M: "claude-opus-4.6"},
 	{Anthropic: "claude-opus-4.5", Kiro: "claude-opus-4.5"},
 	{Anthropic: "claude-haiku-4.5", Kiro: "claude-haiku-4.5"},
+	// GPT 5.6 family (Kiro backend, reasoning.effort schema, 272k input window).
+	// No [1m] aliases: these models have a fixed 272k window and no 1M variant.
+	{Anthropic: "gpt-5.6-sol", Kiro: "gpt-5.6-sol", ContextWindowSize: 272_000},
+	{Anthropic: "gpt-5.6-terra", Kiro: "gpt-5.6-terra", ContextWindowSize: 272_000},
+	{Anthropic: "gpt-5.6-luna", Kiro: "gpt-5.6-luna", ContextWindowSize: 272_000},
+	// Discovery aliases: claude- prefixed IDs that pass Claude Code's gateway
+	// model discovery filter (which drops IDs not starting with
+	// claude/anthropic), so the GPT models appear in the /model picker.
+	{Anthropic: "claude-gpt-5.6-sol", Kiro: "gpt-5.6-sol", ContextWindowSize: 272_000, DisplayName: "GPT 5.6 Sol"},
+	{Anthropic: "claude-gpt-5.6-terra", Kiro: "gpt-5.6-terra", ContextWindowSize: 272_000, DisplayName: "GPT 5.6 Terra"},
+	{Anthropic: "claude-gpt-5.6-luna", Kiro: "gpt-5.6-luna", ContextWindowSize: 272_000, DisplayName: "GPT 5.6 Luna"},
 }
 
 const DefaultModel = "claude-sonnet-4.6"
@@ -159,12 +176,22 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 	}
 
 	// Tier 2: strip `[1m]` (treated as thinking opt-in) and retry.
+	// Reasoning-style models (GPT 5.6) are excluded — they have no 1M variant
+	// and no thinking opt-in, so e.g. `gpt-5.6-sol[1m]` falls through to the
+	// default fallback below. Judging by the resolved Kiro model's intrinsic
+	// capability (not a per-row flag) means env aliases inherit the exclusion
+	// automatically.
+	var reasoningExcluded bool
 	if !matched {
 		if before, ok := strings.CutSuffix(model, ThinkingSuffix); ok {
 			model = before
 			thinking = true
 			for _, m := range mappings {
 				if model == m.Anthropic || model == m.Kiro {
+					if IsReasoningModel(m.Kiro) {
+						reasoningExcluded = true
+						continue
+					}
 					kiroModel = m.Kiro
 					matchedKiro1M = m.Kiro1M
 					matchedWindowSize = m.ContextWindowSize
@@ -181,7 +208,10 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 	}
 
 	if !matched {
-		if strings.HasPrefix(model, "claude-") {
+		// reasoningExcluded blocks the claude- passthrough: a claude- prefixed
+		// discovery alias to a GPT model (`claude-gpt-5.6-sol[1m]`) must not
+		// be forwarded verbatim as an unknown upstream SKU.
+		if strings.HasPrefix(model, "claude-") && !reasoningExcluded {
 			kiroModel = model
 			anthropicModel = model
 		} else {
@@ -221,16 +251,33 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 	return kiroModel, thinking, contextWindowSize, anthropicModel
 }
 
-// ListModels returns a deduplicated list of all Kiro model values from
-// modelMapOrdered plus any env overrides.
-func ListModels() []string {
+// ModelInfo is one entry served by /v1/models.
+type ModelInfo struct {
+	ID          string
+	DisplayName string // optional; picked up by Claude Code's model picker
+}
+
+// ListModels returns a deduplicated list of all model IDs to advertise in
+// /v1/models: each mapping's Kiro value, plus the Anthropic ID of any mapping
+// with a DisplayName (discovery aliases). Env overrides are included.
+func ListModels() []ModelInfo {
 	seen := make(map[string]struct{})
-	var result []string
-	for _, m := range effectiveMappings() {
-		if _, ok := seen[m.Kiro]; !ok {
-			seen[m.Kiro] = struct{}{}
-			result = append(result, m.Kiro)
+	var result []ModelInfo
+	add := func(id, displayName string) {
+		if id == "" {
+			return
 		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		result = append(result, ModelInfo{ID: id, DisplayName: displayName})
+	}
+	for _, m := range effectiveMappings() {
+		if m.DisplayName != "" {
+			add(m.Anthropic, m.DisplayName)
+		}
+		add(m.Kiro, "")
 	}
 	return result
 }

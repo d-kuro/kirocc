@@ -15,6 +15,7 @@ import (
 	"github.com/d-kuro/kirocc/internal/kiroclient"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 	"github.com/d-kuro/kirocc/internal/logging"
+	"github.com/d-kuro/kirocc/internal/models"
 	"github.com/d-kuro/kirocc/internal/respconv"
 )
 
@@ -28,12 +29,15 @@ func roundCredits(c float64) float64 {
 
 const retryReasonEmptyVisibleEndTurn = "empty_visible_end_turn"
 
-func (s *Service) handleStreamingResponse(ctx context.Context, session *streamSession, apiResp *kiroclient.Response, model string, contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int, capture *upstreamAttemptCapture, toolNameMap map[string]string) string {
+func (s *Service) handleStreamingResponse(ctx context.Context, session *streamSession, apiResp *kiroclient.Response, kiroModel, model string, contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int, capture *upstreamAttemptCapture, toolNameMap map[string]string) string {
 	traceID, short := logging.TraceIDs(ctx)
 
 	sw := respconv.NewSSEWriter(ctx, session, model, contextWindowSize, stopSequences, maxTokens, preCountedInputTokens)
 	sw.OnVisibleOutput = session.Promote
 	sw.SetToolNameMap(toolNameMap)
+	// GPT 5.6 delivers a trailing redacted reasoning blob after tool_use, so
+	// the stream must keep draining past an adapter-side stop to capture it.
+	sw.SetDrainOnStop(models.IsReasoningModel(kiroModel))
 	// The kiro client has already confirmed HTTP 200 + event-stream at this
 	// point, and NewSSEWriter has installed downstream SSE headers.
 	session.Start()
@@ -78,6 +82,14 @@ func (s *Service) handleStreamingResponse(ctx context.Context, session *streamSe
 		}
 		if !shouldStop {
 			return false
+		}
+		// Upstream error frames terminate as errors even when a local stop is
+		// already latched (e.g. an exception arriving mid-drain after a GPT
+		// tool-use max_tokens stop) — otherwise the truncated stream would be
+		// reported as a normal local stop without Finish or an error SSE.
+		if e.Type == kiroproto.EventInvalidState || e.Type == kiroproto.EventException {
+			streamErr = true
+			return true
 		}
 		// Distinguish adapter-side stop (Finish already called) from error.
 		// Closing the upstream body immediately on localStop avoids paying

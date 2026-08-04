@@ -393,3 +393,107 @@ func TestSSEWriter_ThinkingViaTags_WithRegularTool(t *testing.T) {
 		t.Fatal("expected tool_use stop_reason")
 	}
 }
+
+func TestSSEWriter_RecordTail_RedactedContent(t *testing.T) {
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "gpt-5.6-sol", 272000, nil, 0, 100)
+	bodyBefore := w.Body.Len()
+	redacted := strings.Repeat("A", 400)
+
+	// Trailing redacted blob after the tool-search frame must be accumulated
+	// for next-round replay, without writing anything to the SSE stream.
+	sw.RecordTail(kiroproto.Event{Type: kiroproto.EventReasoningContent, RedactedContent: redacted})
+
+	if w.Body.Len() != bodyBefore {
+		t.Fatalf("RecordTail wrote SSE bytes (%d → %d)", bodyBefore, w.Body.Len())
+	}
+	got := sw.RedactedContents()
+	if len(got) != 1 || got[0] != redacted {
+		t.Fatalf("RedactedContents() = %v, want one 400-rune blob", got)
+	}
+	inputTokens, outputTokens := sw.Usage()
+	if inputTokens != 100 || outputTokens < 1 {
+		t.Fatalf("Usage() = (%d, %d), want (100, >=1)", inputTokens, outputTokens)
+	}
+}
+
+func TestSSEWriter_MaxTokensWithToolUse_DrainsTrailingBlob(t *testing.T) {
+	w := httptest.NewRecorder()
+	// budget 1 token = 4 runes; the tool input exceeds it → LocalStop.
+	sw := NewSSEWriter(context.Background(), w, "gpt-5.6-sol", 272000, nil, 1, 0)
+	sw.SetDrainOnStop(true)
+
+	stopped := sw.HandleEvent(kiroproto.Event{Type: "toolUseEvent", ToolStop: true, ToolUseID: "call_1", ToolName: "read", ToolInput: `{"path":"/tmp/somewhere"}`})
+	if stopped {
+		t.Fatal("HandleEvent must not terminate on max_tokens when a completed tool call exists (drain trailing blob)")
+	}
+	if !sw.LocalStop() {
+		t.Fatal("expected LocalStop after budget exceeded")
+	}
+	// Trailing blob arrives after the tool_use frame — must still be emitted.
+	sw.HandleEvent(kiroproto.Event{Type: kiroproto.EventReasoningContent, RedactedContent: "late-blob"})
+	_ = sw.Finish()
+
+	body := w.Body.String()
+	if !strings.Contains(body, `"redacted_thinking"`) || !strings.Contains(body, `"late-blob"`) {
+		t.Fatalf("missing trailing redacted_thinking block: %s", body)
+	}
+	if !strings.Contains(body, `"stop_reason":"max_tokens"`) {
+		t.Fatalf("stop_reason should stay max_tokens: %s", body)
+	}
+	if !strings.Contains(body, "message_stop") {
+		t.Fatalf("missing message_stop: %s", body)
+	}
+}
+
+func TestSSEWriter_MaxTokensTextOnly_StopsImmediately(t *testing.T) {
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "claude-sonnet-4.6", 200000, nil, 1, 0)
+
+	stopped := sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "0123456789abcdef"})
+	if !stopped {
+		t.Fatal("text-only max_tokens must terminate the stream immediately")
+	}
+	if !strings.Contains(w.Body.String(), "message_stop") {
+		t.Fatal("Finish must have been called on immediate stop")
+	}
+}
+
+func TestSSEWriter_MaxTokensWithToolUse_NoDrainStopsImmediately(t *testing.T) {
+	// Claude models never emit a trailing reasoning blob: a completed tool
+	// call must not keep the stream draining when drainOnStop is unset.
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "claude-sonnet-4.6", 200000, nil, 1, 0)
+
+	stopped := sw.HandleEvent(kiroproto.Event{Type: "toolUseEvent", ToolStop: true, ToolUseID: "toolu_1", ToolName: "read", ToolInput: `{"path":"/tmp/somewhere"}`})
+	if !stopped {
+		t.Fatal("max_tokens with tool use must terminate immediately without drainOnStop")
+	}
+	if !strings.Contains(w.Body.String(), "message_stop") {
+		t.Fatal("Finish must have been called on immediate stop")
+	}
+}
+
+func TestSSEWriter_MaxTokensRedactedOnly_StopsImmediately(t *testing.T) {
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "gpt-5.6-sol", 272000, nil, 2, 0)
+
+	stopped := sw.HandleEvent(kiroproto.Event{
+		Type:            kiroproto.EventReasoningContent,
+		RedactedContent: strings.Repeat("A", 8),
+	})
+
+	if !stopped {
+		t.Fatal("redacted-only max_tokens must terminate the stream immediately")
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"redacted_thinking"`) {
+		t.Fatalf("missing redacted_thinking block: %s", body)
+	}
+	if !strings.Contains(body, `"stop_reason":"max_tokens"`) {
+		t.Fatalf("missing max_tokens stop reason: %s", body)
+	}
+	if !strings.Contains(body, "message_stop") {
+		t.Fatalf("missing message_stop: %s", body)
+	}
+}

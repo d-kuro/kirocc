@@ -22,15 +22,23 @@ type Payload struct {
 	AdditionalModelRequestFields *AdditionalModelRequestFields `json:"additionalModelRequestFields,omitempty"`
 }
 
-// AdditionalModelRequestFields carries model-specific request options. kiro-cli
-// 2.10.0 sends this at the request root (sibling of conversationState/profileArn)
-// and currently only populates output_config.effort.
+// AdditionalModelRequestFields carries model-specific request options at the
+// request root (sibling of conversationState/profileArn). Exactly one of
+// OutputConfig (Claude family) or Reasoning (GPT 5.6 family) may be set —
+// the backend schemas are mutually exclusive per model.
 type AdditionalModelRequestFields struct {
-	OutputConfig *OutputConfig `json:"output_config,omitempty"`
+	OutputConfig *OutputConfig    `json:"output_config,omitempty"`
+	Reasoning    *ReasoningConfig `json:"reasoning,omitempty"`
 }
 
 // OutputConfig carries the reasoning effort level (low/medium/high/xhigh/max).
 type OutputConfig struct {
+	Effort string `json:"effort,omitempty"`
+}
+
+// ReasoningConfig carries the GPT 5.6 reasoning effort level
+// (none/low/medium/high/xhigh/max).
+type ReasoningConfig struct {
 	Effort string `json:"effort,omitempty"`
 }
 
@@ -161,11 +169,21 @@ type HistoryUserInputMessage struct {
 }
 
 // AssistantResponseMessage is an assistant message within history.
+// Field declaration order is the wire order (HistoryEntry.MarshalJSONTo
+// re-marshals the struct): reasoningContent must sit between toolUses and
+// cachePoint to match kiro-cli captures.
 type AssistantResponseMessage struct {
-	MessageID  string           `json:"messageId,omitempty"`
-	Content    string           `json:"content"`
-	ToolUses   []HistoryToolUse `json:"toolUses,omitempty"`
-	CachePoint *CachePoint      `json:"cachePoint,omitempty"`
+	MessageID        string            `json:"messageId,omitempty"`
+	Content          string            `json:"content"`
+	ToolUses         []HistoryToolUse  `json:"toolUses,omitempty"`
+	ReasoningContent *ReasoningContent `json:"reasoningContent,omitempty"`
+	CachePoint       *CachePoint       `json:"cachePoint,omitempty"`
+}
+
+// ReasoningContent carries the opaque redacted reasoning blob that GPT 5.6
+// models emit and require replayed on tool-use continuation.
+type ReasoningContent struct {
+	RedactedContent string `json:"redactedContent"` // base64-encoded
 }
 
 // HistoryToolUse represents a tool call in an assistant history message.

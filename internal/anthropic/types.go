@@ -34,6 +34,7 @@ type ThinkingConfig struct {
 const (
 	ThinkingTypeEnabled  = "enabled"
 	ThinkingTypeAdaptive = "adaptive"
+	ThinkingTypeDisabled = "disabled"
 )
 
 // IsThinkingEnabled reports whether extended thinking is enabled in the request.
@@ -43,6 +44,14 @@ func (r *Request) IsThinkingEnabled() bool {
 		return false
 	}
 	return r.Thinking.Type == ThinkingTypeEnabled || r.Thinking.Type == ThinkingTypeAdaptive
+}
+
+// IsThinkingDisabled reports whether the request explicitly opts out of
+// reasoning via thinking.type "disabled". Distinguishing disabled from absent
+// matters for models where the opt-out must be forwarded (GPT 5.6 sends
+// reasoning.effort "none" for disabled, omits the field entirely for absent).
+func (r *Request) IsThinkingDisabled() bool {
+	return r.Thinking != nil && r.Thinking.Type == ThinkingTypeDisabled
 }
 
 // Effort returns the effort level from output_config.effort.
@@ -124,6 +133,9 @@ type ContentBlock struct {
 	// thinking block
 	Thinking  string `json:"thinking,omitempty"`
 	Signature string `json:"signature,omitempty"`
+
+	// redacted_thinking block: opaque encrypted reasoning blob (base64)
+	Data string `json:"data,omitempty"`
 
 	// tool_use / server_tool_use block (assistant)
 	ID    string         `json:"id,omitempty"`

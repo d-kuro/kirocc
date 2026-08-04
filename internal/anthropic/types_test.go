@@ -270,6 +270,33 @@ func TestRequest_Effort(t *testing.T) {
 	}
 }
 
+func TestRequest_ThinkingFlags(t *testing.T) {
+	tests := []struct {
+		name         string
+		thinking     *ThinkingConfig
+		wantEnabled  bool
+		wantDisabled bool
+	}{
+		{name: "absent"},
+		{name: "enabled", thinking: &ThinkingConfig{Type: ThinkingTypeEnabled}, wantEnabled: true},
+		{name: "adaptive", thinking: &ThinkingConfig{Type: ThinkingTypeAdaptive}, wantEnabled: true},
+		{name: "disabled", thinking: &ThinkingConfig{Type: ThinkingTypeDisabled}, wantDisabled: true},
+		{name: "unknown", thinking: &ThinkingConfig{Type: "unknown"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := Request{Thinking: tt.thinking}
+			if got := req.IsThinkingEnabled(); got != tt.wantEnabled {
+				t.Fatalf("IsThinkingEnabled() = %v, want %v", got, tt.wantEnabled)
+			}
+			if got := req.IsThinkingDisabled(); got != tt.wantDisabled {
+				t.Fatalf("IsThinkingDisabled() = %v, want %v", got, tt.wantDisabled)
+			}
+		})
+	}
+}
+
 func TestRequest_UnmarshalJSON_OutputConfig(t *testing.T) {
 	raw := `{
 		"model": "claude-opus-4-6",

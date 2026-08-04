@@ -60,10 +60,13 @@ Listens on `http://127.0.0.1:3456` by default.
 ```bash
 export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
 export ANTHROPIC_AUTH_TOKEN=dummy
+export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1   # optional: adds kirocc's models to the /model picker
 claude
 ```
 
 `ANTHROPIC_AUTH_TOKEN` is required by Claude Code but not used for authentication by kirocc (credentials are read from Kiro CLI's DB). Any non-empty value works unless `-api-key` is set.
+
+`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` makes Claude Code fetch `GET /v1/models` from kirocc and list the results in the `/model` picker under "From gateway" — including the GPT 5.6 models via their `claude-gpt-5.6-*` aliases (see [Model picker integration](#model-picker-integration-discovery-aliases)).
 
 ### Use with a Kiro API key
 
@@ -75,6 +78,7 @@ kirocc                               # no Kiro CLI login or database needed
 ```
 
 When `KIRO_API_KEY` is set:
+
 - The SQLite credential database is **never opened** — kirocc does not need Kiro CLI installed
 - No token refresh occurs — the key is presented directly to the Kiro API
 - A revoked key surfaces as a 401 from the API at request time
@@ -90,7 +94,7 @@ export ANTHROPIC_AUTH_TOKEN=dummy
 claude
 ```
 
-API keys are available for Kiro Pro, Pro+, Pro Max, and Power subscribers. On group subscriptions, an administrator must enable key generation in *Settings → Kiro settings → Enable users to generate API keys*. Create keys at [app.kiro.dev](https://app.kiro.dev) → API Keys.
+API keys are available for Kiro Pro, Pro+, Pro Max, and Power subscribers. On group subscriptions, an administrator must enable key generation in _Settings → Kiro settings → Enable users to generate API keys_. Create keys at [app.kiro.dev](https://app.kiro.dev) → API Keys.
 
 ### Command-line options
 
@@ -326,6 +330,51 @@ Per-model allowed effort levels:
 
 `thinking.budget_tokens` is accepted in the request but no longer affects behavior; reasoning depth is conveyed entirely through `effort`.
 
+#### GPT 5.6 models (reasoning schema)
+
+The GPT 5.6 family (`gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`) uses a different `additionalModelRequestFields` schema — `reasoning.effort` instead of `output_config.effort`:
+
+```json
+{
+  "conversationState": { "...": "..." },
+  "additionalModelRequestFields": {
+    "reasoning": { "effort": "high" }
+  }
+}
+```
+
+GPT-specific effort rules:
+
+- No `thinking` field and no explicit effort → the field is omitted entirely (the backend defaults to `high`, matching kiro-cli behavior)
+- `thinking.type: "enabled"` / `"adaptive"` → still omitted (= backend default `high`); no downgrade to `medium`
+- `thinking.type: "disabled"` → `reasoning.effort: "none"` (takes precedence over an explicit effort)
+- Explicit `output_config.effort` → validated against the GPT enum (`none`, `low`, `medium`, `high`, `xhigh`, `max`) and forwarded as `reasoning.effort`
+
+GPT reasoning streams as opaque `redacted_thinking` blocks (base64 blobs, no visible thinking text). The blob arrives **after** text/tool_use in the upstream stream and is surfaced to the client in that order. During tool-use continuations the client must send the `redacted_thinking` block back; kirocc replays it as `reasoningContent.redactedContent` in the request history only while that tool round is in flight.
+
+The `[1m]` suffix and `context-1m` header are not supported for GPT models (`gpt-5.6-sol[1m]` does not resolve). Context window is 272k input / 128k output; limits are enforced by the backend, not the proxy.
+
+#### Model picker integration (discovery aliases)
+
+Claude Code's [gateway model discovery](https://code.claude.com/docs/en/llm-gateway-protocol) fetches `GET /v1/models` and adds the results to the `/model` picker — but it silently drops any ID that doesn't start with `claude` or `anthropic`, so the bare `gpt-5.6-*` IDs never appear. kirocc therefore also advertises `claude-` prefixed discovery aliases:
+
+| Alias                  | Kiro model      | Picker label    |
+| ---------------------- | --------------- | --------------- |
+| `claude-gpt-5.6-sol`   | `gpt-5.6-sol`   | `GPT 5.6 Sol`   |
+| `claude-gpt-5.6-terra` | `gpt-5.6-terra` | `GPT 5.6 Terra` |
+| `claude-gpt-5.6-luna`  | `gpt-5.6-luna`  | `GPT 5.6 Luna`  |
+
+The aliases resolve identically to the canonical IDs (same 272k window, same reasoning schema). To surface them in the picker, launch Claude Code with:
+
+```bash
+export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
+export ANTHROPIC_AUTH_TOKEN=dummy
+export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
+claude
+```
+
+The picker shows them under "From gateway" using the `display_name` values above. The canonical `gpt-5.6-*` IDs still work everywhere else (`--model gpt-5.6-sol`, `ANTHROPIC_MODEL`, direct API calls).
+
 ### Tool Search
 
 The Kiro backend does not support Anthropic's [Tool Search Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool). kirocc implements it proxy-side with an inner loop:
@@ -365,10 +414,16 @@ Supported query forms:
 | `claude-opus-4-6[1m]`   | `claude-opus-4.6`      | 1M             |
 | `claude-opus-4.5`       | `claude-opus-4.5`      | 200k           |
 | `claude-haiku-4.5`      | `claude-haiku-4.5`     | 200k           |
+| `gpt-5.6-sol`           | `gpt-5.6-sol`          | 272k           |
+| `gpt-5.6-terra`         | `gpt-5.6-terra`        | 272k           |
+| `gpt-5.6-luna`          | `gpt-5.6-luna`         | 272k           |
+| `claude-gpt-5.6-sol`    | `gpt-5.6-sol`          | 272k           |
+| `claude-gpt-5.6-terra`  | `gpt-5.6-terra`        | 272k           |
+| `claude-gpt-5.6-luna`   | `gpt-5.6-luna`         | 272k           |
 
 Opus 5, Opus 4.6, 4.7, 4.8, and Sonnet 5 always use 1M context (no 200k SKU exists upstream). Unlike Sonnet 4.6, `claude-opus-5` and `claude-sonnet-5` have no separate `-1m` SKU: each single SKU is always 1M. The explicit `[1m]`-suffixed aliases (`claude-opus-5[1m]` / `claude-opus-4-8[1m]` / `claude-opus-4-7[1m]` / `claude-opus-4-6[1m]` / `claude-sonnet-5[1m]`) are first-class entries that preserve the suffix verbatim in the response `model` field — this matches Claude Code's 1M-context model state and keeps its context-window check happy without spuriously enabling extended thinking. On these always-1M models, thinking remains opt-in via the `context-1m` header or the `thinking` field; the `[1m]` suffix remains a thinking opt-in for models without a first-class always-1M alias.
 
-Unmatched `claude-*` models are passed through as-is. Non-claude models fall back to `claude-sonnet-4.6`.
+Unmatched `claude-*` models are passed through as-is. Non-claude models fall back to `claude-sonnet-4.6` (the `gpt-5.6-*` IDs and their `claude-gpt-5.6-*` discovery aliases above are explicit entries and do not fall back).
 
 #### Response model ID
 

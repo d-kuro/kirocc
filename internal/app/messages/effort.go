@@ -27,7 +27,9 @@ func formatContextWindow(size int) string {
 const defaultThinkingEffort = models.EffortMedium
 
 // resolveEffort maps the request's reasoning intent to a native effort level the
-// resolved Kiro model accepts. Precedence:
+// resolved Kiro model accepts.
+//
+// Claude (output_config style) precedence:
 //
 //  1. An explicit, recognized output_config.effort wins (validated/clamped to
 //     the model's enum; xhigh on a 4-value model clamps to max).
@@ -36,12 +38,24 @@ const defaultThinkingEffort = models.EffortMedium
 //  3. Otherwise (and for unrecognized or unsupported effort), return "" so
 //     additionalModelRequestFields is omitted.
 //
+// GPT 5.6 (reasoning style) differs deliberately:
+//
+//   - thinking.type disabled → "none" (explicit opt-out, wins over explicit effort)
+//   - explicit output_config.effort → validated as usual
+//   - thinking enabled/absent → "" (field omitted; the backend default is high,
+//     matching kiro-cli, which never sends the field)
+//
 // An explicit but unrecognized effort is dropped without invoking the thinking
 // fallback — the client asked for something specific that we couldn't honor, so
 // we don't silently substitute a guess.
 func resolveEffort(ctx context.Context, kiroModel string, req *anthropic.Request, thinking bool) string {
 	_, short := logging.TraceIDs(ctx)
 	requested := req.Effort()
+	reasoningStyle := models.IsReasoningModel(kiroModel)
+
+	if reasoningStyle && req.IsThinkingDisabled() {
+		return models.ResolveEffort(kiroModel, models.EffortNone)
+	}
 
 	if requested != "" {
 		resolved := models.ResolveEffort(kiroModel, requested)
@@ -56,6 +70,12 @@ func resolveEffort(ctx context.Context, kiroModel string, req *anthropic.Request
 			}
 		}
 		return resolved
+	}
+
+	// Reasoning-style models omit the field for enabled/absent: the backend
+	// default (high) already exceeds defaultThinkingEffort.
+	if reasoningStyle {
+		return ""
 	}
 
 	if thinking {

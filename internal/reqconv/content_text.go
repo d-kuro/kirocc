@@ -19,7 +19,7 @@ func ExtractTextContent(content anthropic.MessageContent) string {
 		switch b.Type {
 		case anthropic.BlockTypeText:
 			parts = append(parts, b.Text)
-		case anthropic.BlockTypeThinking, anthropic.BlockTypeToolUse, anthropic.BlockTypeToolResult, anthropic.BlockTypeImage, anthropic.BlockTypeToolReference,
+		case anthropic.BlockTypeThinking, anthropic.BlockTypeRedactedThinking, anthropic.BlockTypeToolUse, anthropic.BlockTypeToolResult, anthropic.BlockTypeImage, anthropic.BlockTypeToolReference,
 			anthropic.BlockTypeServerToolUse, anthropic.BlockTypeToolSearchToolResult:
 			// Skip — handled separately.
 		default:

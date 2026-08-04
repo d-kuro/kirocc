@@ -2,6 +2,7 @@ package kiroproto
 
 import (
 	"encoding/json/v2"
+	"strings"
 	"testing"
 )
 
@@ -174,6 +175,126 @@ func TestAssistantResponseMessage_WithToolUses(t *testing.T) {
 	tu := toolUses[0].(map[string]any)
 	if tu["toolUseId"] != "toolu_01" {
 		t.Fatalf("toolUseId = %v", tu["toolUseId"])
+	}
+}
+
+func TestAssistantResponseMessage_ReasoningContent(t *testing.T) {
+	tests := []struct {
+		name         string
+		arm          AssistantResponseMessage
+		wantKey      bool
+		wantKeyOrder []string // exact wire order of present keys
+	}{
+		{
+			name: "redacted content is emitted between toolUses and cachePoint",
+			arm: AssistantResponseMessage{
+				MessageID: "mid",
+				Content:   "",
+				ToolUses:  []HistoryToolUse{{ToolUseID: "call_x", Name: "read", Input: map[string]any{}}},
+				ReasoningContent: &ReasoningContent{
+					RedactedContent: "base64blob",
+				},
+				CachePoint: &CachePoint{Type: "default"},
+			},
+			wantKey:      true,
+			wantKeyOrder: []string{"messageId", "content", "toolUses", "reasoningContent", "cachePoint"},
+		},
+		{
+			name:    "nil reasoning content omits the key",
+			arm:     AssistantResponseMessage{MessageID: "mid", Content: "hi"},
+			wantKey: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.arm)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m map[string]any
+			if err := json.Unmarshal(data, &m); err != nil {
+				t.Fatal(err)
+			}
+			_, ok := m["reasoningContent"]
+			if ok != tt.wantKey {
+				t.Fatalf("reasoningContent present = %v, want %v (json: %s)", ok, tt.wantKey, data)
+			}
+			if tt.wantKey {
+				rc := m["reasoningContent"].(map[string]any)
+				if rc["redactedContent"] != "base64blob" {
+					t.Fatalf("redactedContent = %v", rc["redactedContent"])
+				}
+			}
+			if tt.wantKeyOrder != nil {
+				assertKeyOrder(t, data, tt.wantKeyOrder)
+			}
+		})
+	}
+}
+
+// assertKeyOrder verifies top-level JSON keys appear in the given order.
+func assertKeyOrder(t *testing.T, data []byte, want []string) {
+	t.Helper()
+	s := string(data)
+	pos := -1
+	for _, key := range want {
+		idx := strings.Index(s, `"`+key+`"`)
+		if idx < 0 {
+			t.Fatalf("key %q not found in %s", key, s)
+		}
+		if idx < pos {
+			t.Fatalf("key %q out of order in %s", key, s)
+		}
+		pos = idx
+	}
+}
+
+func TestAdditionalModelRequestFields_MarshalEffortSchema(t *testing.T) {
+	tests := []struct {
+		name     string
+		fields   AdditionalModelRequestFields
+		wantKeys []string
+		banKeys  []string
+	}{
+		{
+			name:     "reasoning only",
+			fields:   AdditionalModelRequestFields{Reasoning: &ReasoningConfig{Effort: "none"}},
+			wantKeys: []string{"reasoning"},
+			banKeys:  []string{"output_config"},
+		},
+		{
+			name:     "output_config only",
+			fields:   AdditionalModelRequestFields{OutputConfig: &OutputConfig{Effort: "high"}},
+			wantKeys: []string{"output_config"},
+			banKeys:  []string{"reasoning"},
+		},
+		{
+			name:    "empty object",
+			fields:  AdditionalModelRequestFields{},
+			banKeys: []string{"output_config", "reasoning"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.fields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m map[string]any
+			if err := json.Unmarshal(data, &m); err != nil {
+				t.Fatal(err)
+			}
+			for _, k := range tt.wantKeys {
+				if _, ok := m[k]; !ok {
+					t.Fatalf("missing key %q in %s", k, data)
+				}
+			}
+			for _, k := range tt.banKeys {
+				if _, ok := m[k]; ok {
+					t.Fatalf("unexpected key %q in %s", k, data)
+				}
+			}
+		})
 	}
 }
 

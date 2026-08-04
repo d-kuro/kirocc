@@ -44,6 +44,19 @@ func TestResolveEffort(t *testing.T) {
 		// Empty requested effort: nothing sent regardless of model.
 		{"opus-4.8 empty", "claude-opus-4.8", "", ""},
 		{"unsupported empty", "claude-opus-4.5", "", ""},
+
+		// GPT 5.6 family: 6-value enum including none.
+		{"gpt-5.6-sol none", "gpt-5.6-sol", "none", "none"},
+		{"gpt-5.6-sol low", "gpt-5.6-sol", "low", "low"},
+		{"gpt-5.6-sol xhigh", "gpt-5.6-sol", "xhigh", "xhigh"},
+		{"gpt-5.6-sol max", "gpt-5.6-sol", "max", "max"},
+		{"gpt-5.6-terra none", "gpt-5.6-terra", "none", "none"},
+		{"gpt-5.6-luna high", "gpt-5.6-luna", "high", "high"},
+		{"gpt-5.6-luna invalid dropped", "gpt-5.6-luna", "bogus", ""},
+
+		// none must never leak into Claude models (would clamp to max).
+		{"opus-4.8 none dropped not clamped", "claude-opus-4.8", "none", ""},
+		{"sonnet-4.6 none dropped not clamped", "claude-sonnet-4.6", "none", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

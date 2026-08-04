@@ -25,6 +25,13 @@ type SSEWriter struct {
 	writeErr   error
 	acc        responseAccumulator
 
+	// drainOnStop keeps the stream draining after an adapter-side stop when a
+	// completed tool call exists, so a trailing reasoningContentEvent blob
+	// (GPT 5.6) can still be captured. Set by the caller for models that emit
+	// trailing reasoning; Claude models finish immediately to avoid paying for
+	// tokens the client will never receive.
+	drainOnStop bool
+
 	// OnVisibleOutput is called once, just before the first visible output
 	// (text delta or tool_use) is written. Used by the stream session to promote
 	// the buffered writer to direct mode.
@@ -89,8 +96,7 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 			s.writeDelta("text_delta", "text", d.TextDelta)
 		}
 		if d.StopSignal {
-			_ = s.Finish()
-			return true
+			return s.stopOrDrain()
 		}
 
 	case kiroproto.EventReasoningContent:
@@ -108,6 +114,9 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 				},
 			})
 			s.closeActiveBlock()
+			if d.StopSignal {
+				return s.stopOrDrain()
+			}
 			return false
 		}
 		if d.ThinkingDelta == "" {
@@ -115,16 +124,14 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 		}
 		s.writeThinkingDelta(d)
 		if d.StopSignal {
-			_ = s.Finish()
-			return true
+			return s.stopOrDrain()
 		}
 
 	case kiroproto.EventToolUse:
 		if d.ThinkingDelta != "" {
 			s.writeThinkingDelta(d)
 			if d.StopSignal {
-				_ = s.Finish()
-				return true
+				return s.stopOrDrain()
 			}
 			return false
 		}
@@ -155,8 +162,7 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 			},
 		})
 		if d.StopSignal {
-			_ = s.Finish()
-			return true
+			return s.stopOrDrain()
 		}
 
 	case kiroproto.EventInvalidState, kiroproto.EventException:
@@ -314,15 +320,47 @@ func (s *SSEWriter) HasContextUsage() bool { return s.acc.HasContextUsage }
 // The bool is false if no meteringEvent was received.
 func (s *SSEWriter) Credits() (float64, bool) { return s.acc.Credits, s.acc.HasCredits }
 
-// RecordTail forwards trailing metadata events (meteringEvent, contextUsageEvent)
-// to the inner accumulator without writing anything to the SSE stream. Used by
-// the tool-search orchestrator to keep collecting credit/context usage after the
-// upstream tool-use frame is detected, so cumulative stats remain accurate.
+// RecordTail forwards trailing metadata events (meteringEvent, contextUsageEvent,
+// reasoningContentEvent) to the inner accumulator without writing anything to
+// the SSE stream. Used by the tool-search orchestrator to keep collecting
+// credit/context usage and trailing redacted reasoning blobs after the upstream
+// tool-use frame is detected, so cumulative stats stay accurate and the blob
+// can be replayed into the next round's history.
 func (s *SSEWriter) RecordTail(e kiroproto.Event) {
 	switch e.Type {
 	case kiroproto.EventMetering, kiroproto.EventContextUsage:
 		s.acc.ProcessEvent(e)
+	case kiroproto.EventReasoningContent:
+		if e.RedactedContent != "" {
+			s.acc.ProcessEvent(e)
+		}
 	}
+}
+
+// RedactedContents returns the redacted reasoning blobs accumulated this round.
+func (s *SSEWriter) RedactedContents() []string {
+	return s.acc.RedactedContents
+}
+
+// SetDrainOnStop marks the stream as draining after an adapter-side stop when
+// a completed tool call exists. Set for models that emit a trailing
+// reasoningContentEvent blob after tool_use (GPT 5.6).
+func (s *SSEWriter) SetDrainOnStop(drain bool) {
+	s.drainOnStop = drain
+}
+
+// stopOrDrain handles an adapter-side stop signal (stop_sequence / max_tokens).
+// When drainOnStop is set and a completed tool call exists, the model may still
+// deliver a trailing reasoningContentEvent blob the client needs for
+// continuation, so the stream keeps draining; the caller's parse loop reaches
+// upstream EOF and calls Finish. Otherwise the stream finishes immediately to
+// avoid paying for tokens the client will never receive.
+func (s *SSEWriter) stopOrDrain() bool {
+	if s.drainOnStop && s.acc.HasToolUse {
+		return false
+	}
+	_ = s.Finish()
+	return true
 }
 
 // writeThinkingDelta writes a thinking_delta SSE event using direct formatting.

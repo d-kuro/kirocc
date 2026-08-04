@@ -3,7 +3,6 @@ package respconv
 import (
 	"encoding/json/jsontext"
 	"math"
-	"unicode/utf8"
 
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 )
@@ -48,7 +47,7 @@ func (a *responseAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 			a.Signature = e.Signature
 		}
 		if e.RedactedContent != "" {
-			d.RedactedContent = e.RedactedContent
+			a.accumulateRedacted(e.RedactedContent, &d)
 			return d
 		}
 		// Guard against double-counting: if thinking tags were already parsed
@@ -142,12 +141,7 @@ func (a *responseAccumulator) processToolUseEvent(e kiroproto.Event, d *EventDel
 	// Unlike text/thinking, tool input JSON cannot be truncated mid-stream
 	// (would produce invalid JSON), so we check the budget inline instead
 	// of using applyMaxTokensBudget which truncates at a rune boundary.
-	toolRunes := utf8.RuneCountInString(e.ToolInput)
-	a.outputRuneCount += toolRunes
-	if a.maxTokensBudget > 0 && a.outputRuneCount/4 >= a.maxTokensBudget {
-		a.LocalStop = true
-		a.StopReason = StopReasonMaxTokens
-	}
+	a.accumulateOpaqueOutput(e.ToolInput)
 	a.ToolCalls = append(a.ToolCalls, tc)
 	d.ToolStop = true
 	d.ToolUseID = e.ToolUseID
