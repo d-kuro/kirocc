@@ -71,6 +71,7 @@ const defaultBodyReadIdleTimeout = 180 * time.Second
 type HTTPClient struct {
 	httpClient     *http.Client
 	baseURL        string // override for tests; empty = use region-based URL
+	region         string // pins the endpoint region; empty = use the per-call region
 	otel           bool
 	otelBodyLimit  int
 	tokenRefresher TokenRefresher
@@ -85,6 +86,17 @@ type HTTPClientOption func(*HTTPClient)
 // WithBaseURL sets a custom base URL (for testing).
 func WithBaseURL(url string) HTTPClientOption {
 	return func(c *HTTPClient) { c.baseURL = url }
+}
+
+// WithRegion pins the region used to build the Kiro API endpoint, overriding
+// the per-call region that comes from the credential. Needed because the
+// credential's region is a sign-in region, not necessarily a region with a
+// runtime endpoint: kiro-cli stores its own login region in the token, and
+// resolving it produces a hostname that does not exist for users who signed in
+// outside Kiro's serving regions. An empty value leaves the per-call region in
+// effect.
+func WithRegion(region string) HTTPClientOption {
+	return func(c *HTTPClient) { c.region = region }
 }
 
 // WithTokenRefresher sets the token refresh callback for 403 retry.
@@ -164,11 +176,20 @@ func (c *HTTPClient) recordError(ctx context.Context, err error) {
 	}
 }
 
+// effectiveRegion returns the region actually used for the endpoint: the pinned
+// override when set, otherwise the region supplied by the caller.
+func (c *HTTPClient) effectiveRegion(region string) string {
+	if c.region != "" {
+		return c.region
+	}
+	return region
+}
+
 func (c *HTTPClient) endpointURL(region string) string {
 	if c.baseURL != "" {
 		return c.baseURL
 	}
-	return fmt.Sprintf("https://runtime.%s.kiro.dev/", region)
+	return fmt.Sprintf("https://runtime.%s.kiro.dev/", c.effectiveRegion(region))
 }
 
 // GenerateAssistantResponse sends a request to the Kiro API with retry logic.
@@ -180,7 +201,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 		ctx, span = tracing.Tracer().Start(ctx, "kiro.GenerateAssistantResponse")
 		defer span.End()
 		span.SetAttributes(
-			attribute.String("kiro.region", region),
+			attribute.String("kiro.region", c.effectiveRegion(region)),
 			attribute.String("kiro.endpoint", endpoint),
 		)
 	}

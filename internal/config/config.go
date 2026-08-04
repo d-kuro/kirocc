@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"time"
@@ -27,14 +28,33 @@ type Config struct {
 	// KiroAPIKey is a Kiro API key ("ksk_…") used upstream instead of the
 	// kiro-cli database credential. Named after Kiro's own KIRO_API_KEY rather
 	// than the KIROCC_* convention, since it is Kiro's credential, not kirocc's.
-	KiroAPIKey        string
-	KiroAPIRegion     string
+	KiroAPIKey string
+	// KiroAPIRegion pins the AWS region used to build Kiro API endpoints
+	// (https://runtime.<region>.kiro.dev/ and the ListAvailableModels control
+	// plane). It overrides the region derived from the credential, which is not
+	// always a region Kiro actually serves: kiro-cli stores the sign-in region
+	// in its token, and only a handful of regions have a runtime endpoint.
+	// Empty means "use the credential's region" (us-east-1 for API-key auth).
+	KiroAPIRegion string
+	// ModelDiscovery enables fetching Kiro's model catalog at startup so newly
+	// launched models resolve without a kirocc release. Built-in mappings always
+	// win; discovery only fills gaps.
+	ModelDiscovery    bool
 	Debug             bool
 	OTel              bool
 	OTelBodyLimit     int
 	KeepAliveInterval time.Duration
 	LogFile           logging.LogFileConfig
 }
+
+// regionPattern matches the region forms Kiro uses ("us-east-1",
+// "us-gov-west-1"). The value is interpolated into an API hostname, so it is
+// validated rather than trusted — a stray "/" or "@" would otherwise send
+// requests, and the bearer token with them, to an arbitrary host.
+var regionPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// maxRegionLen bounds the region string; real regions are far shorter.
+const maxRegionLen = 64
 
 // DefaultDBPath returns the default kiro-cli SQLite database location.
 func DefaultDBPath() string {
@@ -64,6 +84,9 @@ func ApplyEnvOverrides(cfg *Config) error {
 	applyString("KIRO_API_KEY", &cfg.KiroAPIKey)
 	applyString("KIRO_API_REGION", &cfg.KiroAPIRegion)
 	applyString("KIROCC_HOST", &cfg.Host)
+	if err := applyBool("KIROCC_MODEL_DISCOVERY", &cfg.ModelDiscovery); err != nil {
+		return err
+	}
 	if err := applyInt("KIROCC_PORT", &cfg.Port); err != nil {
 		return err
 	}
@@ -113,6 +136,11 @@ func (c *Config) Validate() error {
 	}
 	if c.KeepAliveInterval != 0 && c.KeepAliveInterval < time.Second {
 		return fmt.Errorf("keepalive-interval must be 0 or >= 1s, got %s", c.KeepAliveInterval)
+	}
+	if c.KiroAPIRegion != "" {
+		if len(c.KiroAPIRegion) > maxRegionLen || !regionPattern.MatchString(c.KiroAPIRegion) {
+			return fmt.Errorf("kiro-api-region must be a lowercase region like us-east-1, got %q", c.KiroAPIRegion)
+		}
 	}
 	return nil
 }

@@ -310,13 +310,17 @@ func TestAmzSdkRequestHeader_ConsistentAcrossRetries(t *testing.T) {
 
 func TestHTTPClient_EndpointURL(t *testing.T) {
 	tests := []struct {
-		name    string
-		baseURL string
-		region  string
-		want    string
+		name           string
+		baseURL        string
+		regionOverride string
+		region         string
+		want           string
 	}{
-		{"region-based", "", "us-west-2", "https://runtime.us-west-2.kiro.dev/"},
-		{"override", "http://localhost:8080", "us-west-2", "http://localhost:8080"},
+		{"region-based", "", "", "us-west-2", "https://runtime.us-west-2.kiro.dev/"},
+		{"override", "http://localhost:8080", "", "us-west-2", "http://localhost:8080"},
+		{"region override wins over credential region", "", "eu-central-1", "ap-southeast-1", "https://runtime.eu-central-1.kiro.dev/"},
+		{"region override applies when credential region is empty", "", "us-east-1", "", "https://runtime.us-east-1.kiro.dev/"},
+		{"base URL wins over region override", "http://localhost:8080", "eu-central-1", "us-west-2", "http://localhost:8080"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -324,9 +328,36 @@ func TestHTTPClient_EndpointURL(t *testing.T) {
 			if tt.baseURL != "" {
 				opts = append(opts, WithBaseURL(tt.baseURL))
 			}
+			if tt.regionOverride != "" {
+				opts = append(opts, WithRegion(tt.regionOverride))
+			}
 			c := NewHTTPClient(opts...)
 			if got := c.endpointURL(tt.region); got != tt.want {
 				t.Errorf("endpointURL(%q) = %q, want %q", tt.region, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHTTPClient_EffectiveRegion(t *testing.T) {
+	tests := []struct {
+		name           string
+		regionOverride string
+		region         string
+		want           string
+	}{
+		{"no override passes through", "", "us-west-2", "us-west-2"},
+		{"override replaces", "eu-central-1", "us-west-2", "eu-central-1"},
+		{"empty override with empty region", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var opts []HTTPClientOption
+			if tt.regionOverride != "" {
+				opts = append(opts, WithRegion(tt.regionOverride))
+			}
+			if got := NewHTTPClient(opts...).effectiveRegion(tt.region); got != tt.want {
+				t.Errorf("effectiveRegion(%q) = %q, want %q", tt.region, got, tt.want)
 			}
 		})
 	}

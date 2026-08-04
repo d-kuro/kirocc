@@ -101,15 +101,19 @@ func envMappings() []Mapping {
 	return mappings
 }
 
-// effectiveMappings returns env overrides followed by built-in mappings.
+// effectiveMappings returns env overrides, then built-in mappings, then any
+// mappings discovered from Kiro's catalog. First match wins, so an explicit
+// override beats a built-in and a built-in beats discovery.
 func effectiveMappings() []Mapping {
 	overrides := envMappings()
-	if len(overrides) == 0 {
+	discovered := catalogMappings()
+	if len(overrides) == 0 && len(discovered) == 0 {
 		return modelMapOrdered
 	}
-	result := make([]Mapping, 0, len(overrides)+len(modelMapOrdered))
+	result := make([]Mapping, 0, len(overrides)+len(modelMapOrdered)+len(discovered))
 	result = append(result, overrides...)
 	result = append(result, modelMapOrdered...)
+	result = append(result, discovered...)
 	return result
 }
 

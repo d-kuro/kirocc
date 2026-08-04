@@ -57,6 +57,11 @@ func ResolveEffort(kiroModel, requested string) string {
 	}
 	enum, ok := effortEnums[kiroModel]
 	if !ok {
+		// Fall back to the discovered catalog so a model launched after this
+		// build still gets its effort forwarded instead of silently dropped.
+		enum, ok = catalogEffortEnum(kiroModel)
+	}
+	if !ok {
 		return ""
 	}
 	if slices.Contains(enum, requested) {
