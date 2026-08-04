@@ -113,6 +113,41 @@ func SanitizeJSONSchema(schema map[string]any) map[string]any {
 	return result
 }
 
+// EnsureObjectRoot wraps a sanitized schema in an object envelope if its root
+// type is not "object". Call this on the final schema passed to Kiro, not during
+// recursive sanitization of nested properties.
+//
+// Kiro/Bedrock rejects any tool whose inputSchema.json.type is not "object":
+//
+//	ValidationException: The value at toolConfig.tools.0.toolSpec.inputSchema.json.type
+//	must be one of the following: object. reason: TOOL_SCHEMA_INVALID
+//
+// Anthropic's API has no such constraint, so clients (including Claude Code's
+// built-in tools like WebSearch) may send schemas with type:"string" or no type
+// at all. This wrapper satisfies the validation without altering semantics for
+// the model.
+func EnsureObjectRoot(schema map[string]any) map[string]any {
+	if len(schema) == 0 {
+		return map[string]any{"type": "object", "properties": map[string]any{}}
+	}
+	t, _ := schema["type"].(string)
+	if t == "object" {
+		return schema
+	}
+	if t == "" {
+		// No type declared — add it rather than wrapping.
+		schema["type"] = "object"
+		return schema
+	}
+	// Non-object type: wrap in an object envelope.
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"input": schema,
+		},
+	}
+}
+
 // dropNullBranches returns branches that are not {type: "null"}.
 func dropNullBranches(branches []any) []any {
 	var result []any

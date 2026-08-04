@@ -22,7 +22,7 @@ func ConvertTools(tools []anthropic.Tool, nameMap *ToolNameMap) []kiroproto.Tool
 			ToolSpecification: &kiroproto.ToolSpecification{
 				Name:        name,
 				Description: desc,
-				InputSchema: kiroproto.InputSchema{JSON: SanitizeJSONSchema(t.InputSchema)},
+				InputSchema: kiroproto.InputSchema{JSON: EnsureObjectRoot(SanitizeJSONSchema(t.InputSchema))},
 			},
 		})
 	}
