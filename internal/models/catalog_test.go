@@ -183,24 +183,31 @@ func TestSetCatalog_EffortFallback(t *testing.T) {
 func TestSetCatalog_ListModelsIncludesDiscovered(t *testing.T) {
 	resetCatalog(t)
 	t.Setenv("KIROCC_MODEL_MAPPINGS", "")
+	// The non-claude probe must be an ID absent from modelMapOrdered: built-in
+	// non-claude entries (the gpt-5.6 family) are advertised by design, so only
+	// an unknown ID proves discovery itself skipped it.
 	SetCatalog([]CatalogModel{
 		{ID: "claude-opus-9", MaxInputTokens: 1_000_000},
-		{ID: "gpt-5.6-terra", MaxInputTokens: 272_000},
+		{ID: "gpt-9-nova", MaxInputTokens: 272_000},
 	})
 
 	got := ListModels()
-	if !slices.Contains(got, "claude-opus-9") {
-		t.Errorf("ListModels() = %v, missing claude-opus-9", got)
-	}
-	if slices.Contains(got, "gpt-5.6-terra") {
-		t.Errorf("ListModels() = %v, must not include non-claude models", got)
-	}
-	seen := make(map[string]bool, len(got))
+	ids := make([]string, 0, len(got))
 	for _, m := range got {
-		if seen[m] {
-			t.Errorf("ListModels() returned duplicate %q", m)
+		ids = append(ids, m.ID)
+	}
+	if !slices.Contains(ids, "claude-opus-9") {
+		t.Errorf("ListModels() = %v, missing claude-opus-9", ids)
+	}
+	if slices.Contains(ids, "gpt-9-nova") {
+		t.Errorf("ListModels() = %v, discovery must not add non-claude models", ids)
+	}
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			t.Errorf("ListModels() returned duplicate %q", id)
 		}
-		seen[m] = true
+		seen[id] = true
 	}
 }
 
