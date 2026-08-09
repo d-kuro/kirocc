@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/d-kuro/kirocc/internal/advisor"
 	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/auth"
 	"github.com/d-kuro/kirocc/internal/httpx"
@@ -57,17 +58,19 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 
 	effort := resolveEffort(ctx, kiroModel, req, thinking)
 
-	// Tool search short-circuits to the orchestrator, which has its own retry loop.
-	if tsCtx := toolsearch.NewContext(req.Tools); tsCtx != nil {
-		refs := reqconv.ExtractToolReferences(req.Messages)
-		tsCtx.PromoteTools(refs)
+	// Server-side tools (tool search, advisor) short-circuit to the
+	// orchestrator, which has its own retry loop.
+	tsCtx, advCtx := newServerToolContexts(req)
+	if tsCtx != nil {
 		slog.InfoContext(ctx, "tool search enabled",
 			"trace_id", short,
 			"search_type", tsCtx.SearchType,
 			"deferred_tools", len(tsCtx.DeferredTools),
 			"active_tools", len(tsCtx.ActiveTools),
 		)
-		s.runToolSearch(ctx, w, req, creds, tsCtx, kiroModel, anthropicModel, contextWindowSize, thinking, effort, ccSessionID, short)
+	}
+	if tsCtx != nil || advCtx != nil {
+		s.runServerTools(ctx, w, req, creds, tsCtx, advCtx, kiroModel, anthropicModel, contextWindowSize, effort, ccSessionID, short)
 		return
 	}
 
@@ -115,11 +118,33 @@ func (s *Service) logRequest(ctx context.Context, short, ccSessionID, kiroModel 
 	)
 }
 
-// runToolSearch wires up the orchestrator and retries once on empty-visible end_turn.
-func (s *Service) runToolSearch(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, creds *auth.Credentials, tsCtx *toolsearch.Context, kiroModel, responseModel string, contextWindowSize int, thinking bool, effort string, ccSessionID, short string) {
-	orch := &toolSearchOrchestrator{
+// newServerToolContexts builds the per-request server-side tool contexts.
+// Both the live send path and count_tokens call this so the payload they build
+// carries an identical tool set — a token count derived from a different tool
+// list would under-report by the size of the tool schemas.
+func newServerToolContexts(req *anthropic.Request) (*toolsearch.Context, *advisor.Context) {
+	tsCtx := toolsearch.NewContext(req.Tools)
+	if tsCtx != nil {
+		tsCtx.PromoteTools(reqconv.ExtractToolReferences(req.Messages))
+	}
+	// models.ResolveKnown is strict by design: an unknown advisor model must
+	// yield model_not_found, never a silent downgrade to a default model.
+	return tsCtx, advisor.NewContext(req.Tools, models.ResolveKnown)
+}
+
+// runServerTools wires up the orchestrator and retries once on empty-visible end_turn.
+func (s *Service) runServerTools(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, creds *auth.Credentials, tsCtx *toolsearch.Context, advCtx *advisor.Context, kiroModel, responseModel string, contextWindowSize int, effort string, ccSessionID, short string) {
+	var dropNames []string
+	if tsCtx != nil {
+		dropNames = append(dropNames, toolsearch.KiroToolSearchName)
+	}
+	if advCtx != nil {
+		dropNames = append(dropNames, advisor.KiroToolName)
+	}
+	orch := &serverToolOrchestrator{
 		service: s,
 		tsCtx:   tsCtx,
+		advCtx:  advCtx,
 		req:     req,
 		creds:   creds,
 		buildOpts: reqconv.BuildOptions{
@@ -128,27 +153,29 @@ func (s *Service) runToolSearch(ctx context.Context, w http.ResponseWriter, req 
 			ConversationID: ccSessionID,
 			Effort:         effort,
 			ToolSearchCtx:  tsCtx,
+			AdvisorCtx:     advCtx,
 		},
 		contextWindowSize: contextWindowSize,
 		responseModel:     responseModel,
+		dropNames:         dropNames,
 	}
 	if req.Stream {
 		session := newStreamSession(ctx, w, s.keepAliveInterval)
 		defer session.Stop()
-		s.runToolSearchWithRetry(session.Context(), session, session, orch, short)
+		s.runServerToolsWithRetry(session.Context(), session, session, orch, short)
 		return
 	}
-	s.runToolSearchWithRetry(ctx, w, nil, orch, short)
+	s.runServerToolsWithRetry(ctx, w, nil, orch, short)
 }
 
-func (s *Service) runToolSearchWithRetry(ctx context.Context, w http.ResponseWriter, session *streamSession, orch *toolSearchOrchestrator, short string) {
+func (s *Service) runServerToolsWithRetry(ctx context.Context, w http.ResponseWriter, session *streamSession, orch *serverToolOrchestrator, short string) {
 	reason := orch.run(ctx, w, session)
 	if reason != retryReasonEmptyVisibleEndTurn {
 		return
 	}
-	slog.WarnContext(ctx, "retrying tool search after empty visible end_turn", "trace_id", short)
+	slog.WarnContext(ctx, "retrying server tool loop after empty visible end_turn", "trace_id", short)
 	if r2 := orch.run(ctx, w, session); r2 == retryReasonEmptyVisibleEndTurn {
-		slog.ErrorContext(ctx, "tool search retry also returned empty visible end_turn", "trace_id", short)
+		slog.ErrorContext(ctx, "server tool retry also returned empty visible end_turn", "trace_id", short)
 		if session != nil {
 			_ = session.WriteFinalError(newStreamFinalError(http.StatusBadGateway, errTypeAPI, "upstream returned empty response"), nil)
 		} else {

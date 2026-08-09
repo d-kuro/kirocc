@@ -1,6 +1,7 @@
 package reqconv
 
 import (
+	"github.com/d-kuro/kirocc/internal/advisor"
 	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 	"github.com/d-kuro/kirocc/internal/models"
@@ -18,6 +19,7 @@ type BuildOptions struct {
 	// additionalModelRequestFields is omitted entirely.
 	Effort        string
 	ToolSearchCtx *toolsearch.Context
+	AdvisorCtx    *advisor.Context
 }
 
 // BuildPayload converts an Anthropic request into a Kiro API payload.
@@ -25,17 +27,17 @@ func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payl
 	nameMap := NewToolNameMap()
 
 	// 1. Build system prompt and convert tools.
-	systemPrompt, toolEntries := buildSystemAndTools(req, options.ToolSearchCtx, nameMap)
+	systemPrompt, toolEntries := buildSystemAndTools(req, options.ToolSearchCtx, options.AdvisorCtx, nameMap)
 
 	// envState is derived from the system prompt's <env> block (no host
 	// fallback) and only ever attached to the current message.
 	envState := ParseEnvState(systemPrompt)
 
 	// 2. Normalize and split messages.
-	hasTools := len(req.Tools) > 0
-	if options.ToolSearchCtx != nil {
-		hasTools = true
-	}
+	// Keyed off the converted entries, not req.Tools: a request whose only tool
+	// is a server-side definition (advisor) has no callable tools upstream and
+	// must normalize as a tool-less conversation.
+	hasTools := len(toolEntries) > 0
 	msgs := Normalize(req.Messages, hasTools)
 	historyMsgs, lastMsg := splitMessages(msgs)
 
@@ -86,18 +88,28 @@ func BuildPayload(req *anthropic.Request, options BuildOptions) (*kiroproto.Payl
 }
 
 // buildSystemAndTools extracts the system prompt and converts tools.
-func buildSystemAndTools(req *anthropic.Request, tsCtx *toolsearch.Context, nameMap *ToolNameMap) (string, []kiroproto.ToolEntry) {
+func buildSystemAndTools(req *anthropic.Request, tsCtx *toolsearch.Context, advisorCtx *advisor.Context, nameMap *ToolNameMap) (string, []kiroproto.ToolEntry) {
 	systemPrompt := ExtractSystemPrompt(req.System)
 
-	var toolEntries []kiroproto.ToolEntry
+	// Server-side tool definitions (tool search, advisor) are emulated in-proxy
+	// and must never reach Kiro as callable function tools. Filtering happens
+	// once so conversion and cache-point placement walk the same list.
+	tools := req.Tools
 	if tsCtx != nil {
-		// Tool search mode: convert only active tools, inject ToolSearch tool.
-		toolEntries = ConvertTools(tsCtx.ActiveTools, nameMap)
-		toolEntries = ApplyToolCachePoints(tsCtx.ActiveTools, toolEntries)
+		tools = tsCtx.ActiveTools
+	}
+	callable := anthropic.CallableTools(tools)
+
+	var toolEntries []kiroproto.ToolEntry
+	if len(callable) > 0 {
+		toolEntries = ConvertTools(callable, nameMap)
+		toolEntries = ApplyToolCachePoints(callable, toolEntries)
+	}
+	if tsCtx != nil {
 		toolEntries = append(toolEntries, toolsearch.KiroToolSearchEntry())
-	} else if len(req.Tools) > 0 {
-		toolEntries = ConvertTools(req.Tools, nameMap)
-		toolEntries = ApplyToolCachePoints(req.Tools, toolEntries)
+	}
+	if advisorCtx != nil {
+		toolEntries = append(toolEntries, advisorCtx.KiroToolEntry())
 	}
 	return systemPrompt, toolEntries
 }

@@ -38,9 +38,13 @@ func (n *NonStreamingAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 	return n.acc.ProcessEvent(e)
 }
 
-// SetDropToolName sets the tool name to filter from accumulator recording.
-func (n *NonStreamingAccumulator) SetDropToolName(name string) {
-	n.acc.DropToolName = name
+// HasToolUse reports whether a client-visible tool call was recorded.
+// Dropped server-tool calls are excluded.
+func (n *NonStreamingAccumulator) HasToolUse() bool { return n.acc.HasToolUse }
+
+// SetDropToolNames sets the tool names to filter from accumulator recording.
+func (n *NonStreamingAccumulator) SetDropToolNames(names ...string) {
+	n.acc.setDropToolNames(names)
 }
 
 // SetToolNameMap sets the short→original tool name map for response remapping.
@@ -51,6 +55,29 @@ func (n *NonStreamingAccumulator) SetToolNameMap(m map[string]string) {
 // BuildResponse builds the final Anthropic response from accumulated events.
 func (n *NonStreamingAccumulator) BuildResponse(model string) (map[string]any, NonStreamingStats) {
 	return buildResponseFromAcc(&n.acc, model)
+}
+
+// FinalizeText finalizes the stream and returns the accumulated visible text,
+// resolved stop reason, and token stats without building the client response
+// map. Call exactly once, instead of BuildResponse. Used for internal
+// subcalls (advisor) where only the text matters.
+func (n *NonStreamingAccumulator) FinalizeText() (text, stopReason string, stats NonStreamingStats) {
+	_, _, res := finalizeResult(&n.acc)
+	return n.acc.TextBuf.String(), res.StopReason, statsFromAcc(&n.acc, res)
+}
+
+// statsFromAcc assembles the caller-visible stats from a finalized accumulator.
+// Single-sourced so a new stat cannot be reported by one path and silently
+// zeroed by the other.
+func statsFromAcc(acc *responseAccumulator, res finalResult) NonStreamingStats {
+	return NonStreamingStats{
+		InputTokens:            res.InputTokens,
+		OutputTokens:           res.OutputTokens,
+		HasContextUsage:        acc.HasContextUsage,
+		ContextUsagePercentage: acc.ContextUsagePercentage,
+		HasCredits:             acc.HasCredits,
+		Credits:                acc.Credits,
+	}
 }
 
 // IsEmptyVisibleEndTurn reports whether the response had thinking but no visible text or tool use.
@@ -133,14 +160,7 @@ func buildResponseFromAcc(acc *responseAccumulator, model string) (map[string]an
 		})
 	}
 
-	stats := NonStreamingStats{
-		InputTokens:            res.InputTokens,
-		OutputTokens:           res.OutputTokens,
-		HasContextUsage:        acc.HasContextUsage,
-		ContextUsagePercentage: acc.ContextUsagePercentage,
-		HasCredits:             acc.HasCredits,
-		Credits:                acc.Credits,
-	}
+	stats := statsFromAcc(acc, res)
 
 	return map[string]any{
 		"id":            "msg_" + uuid.New().String()[:24],

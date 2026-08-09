@@ -14,9 +14,11 @@ const (
 )
 
 // Normalize runs the normalization pipeline on messages. Ordering matters:
-// tool content handling runs first (it inspects original block shapes), then
-// role normalization, merging, and alternation fixups.
+// server-side tool rounds are split into the user/assistant alternation Kiro
+// requires first (it inspects the original packed assistant blocks), then tool
+// content handling, role normalization, merging, and alternation fixups.
 func Normalize(msgs []anthropic.Message, hasTools bool) []anthropic.Message {
+	msgs = ExpandServerToolResults(msgs)
 	msgs = textualizeToolContent(msgs, hasTools)
 	msgs = normalizeRoles(msgs)
 	msgs = mergeAdjacentSameRole(msgs)

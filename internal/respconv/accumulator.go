@@ -80,9 +80,10 @@ type responseAccumulator struct {
 	thinkingTagInside        bool   // currently inside <thinking> tags
 	thinkingTagBuf           string // buffer for partial tag matching across chunk boundaries
 	suppressReasoningContent bool   // true if <thinking> tags were detected (guards against double-counting with reasoningContentEvent)
-	// DropToolName, when set, causes ProcessEvent to skip recording tool_use
-	// events with this name in HasToolUse/ToolCalls (used by tool search orchestrator).
-	DropToolName string
+	// dropToolNames, when set, causes ProcessEvent to skip recording tool_use
+	// events with these names in HasToolUse/ToolCalls (used by the server-tool
+	// orchestrator for the synthetic ToolSearch and advisor tools).
+	dropToolNames map[string]struct{}
 	// toolNameMap maps shortened tool names back to originals (short→original).
 	// When set, tool names from Kiro responses are restored before emitting to the client.
 	toolNameMap map[string]string
@@ -97,6 +98,19 @@ func newAccumulator(contextWindowSize int, stopSequences []string, maxTokens int
 	}
 	acc.initStopSequences(stopSequences)
 	return acc
+}
+
+// setDropToolNames replaces the set of tool names filtered from recording.
+func (a *responseAccumulator) setDropToolNames(names []string) {
+	if len(names) == 0 {
+		a.dropToolNames = nil
+		return
+	}
+	set := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		set[n] = struct{}{}
+	}
+	a.dropToolNames = set
 }
 
 // IsEmptyVisibleEndTurn reports whether the response completed with reasoning

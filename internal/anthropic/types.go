@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"slices"
 )
 
 // Request represents an incoming Anthropic Messages API request.
@@ -156,6 +157,13 @@ type ContentBlock struct {
 	// tool_search_tool_search_result (nested inside tool_search_tool_result content)
 	ToolReferences []ContentBlock `json:"tool_references,omitempty"`
 
+	// advisor_result / advisor_redacted_result / advisor_tool_result_error
+	// (nested inside advisor_tool_result content). EncryptedContent is
+	// Anthropic-key encrypted and can only be echoed, never produced.
+	EncryptedContent string `json:"encrypted_content,omitempty"`
+	StopReason       string `json:"stop_reason,omitempty"`
+	ErrorCode        string `json:"error_code,omitempty"`
+
 	// cache_control (prompt caching)
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
@@ -168,6 +176,13 @@ func (b ContentBlock) IsToolUse() bool {
 // IsToolResult reports whether this block is a tool_result or tool_search_tool_result block.
 func (b ContentBlock) IsToolResult() bool {
 	return b.Type == BlockTypeToolResult || b.Type == BlockTypeToolSearchToolResult
+}
+
+// IsServerToolResult reports whether this block is a server-side tool result
+// that appears inside an assistant response (paired with a server_tool_use in
+// the same message), as opposed to a user-authored tool_result.
+func (b ContentBlock) IsServerToolResult() bool {
+	return b.Type == BlockTypeToolSearchToolResult || b.Type == BlockTypeAdvisorToolResult
 }
 
 // ImageSource represents the source of an image content block.
@@ -188,6 +203,23 @@ const (
 	ToolTypeSearchBM25  = "tool_search_tool_bm25_20251119"
 )
 
+// ToolTypeAdvisor is the advisor server-side tool definition type.
+const ToolTypeAdvisor = "advisor_20260301"
+
+// AdvisorToolName is the name the advisor tool is always registered under.
+const AdvisorToolName = "advisor"
+
+// Advisor tool result error codes.
+const (
+	AdvisorErrorMaxUsesExceeded       = "max_uses_exceeded"
+	AdvisorErrorPromptTooLong         = "prompt_too_long"
+	AdvisorErrorTooManyRequests       = "too_many_requests"
+	AdvisorErrorOverloaded            = "overloaded"
+	AdvisorErrorUnavailable           = "unavailable"
+	AdvisorErrorExecutionTimeExceeded = "execution_time_exceeded"
+	AdvisorErrorModelNotFound         = "model_not_found"
+)
+
 // Content block type constants.
 const (
 	BlockTypeText                   = "text"
@@ -201,6 +233,10 @@ const (
 	BlockTypeToolSearchSearchResult = "tool_search_tool_search_result"
 	BlockTypeToolSearchResultError  = "tool_search_tool_result_error"
 	BlockTypeRedactedThinking       = "redacted_thinking"
+	BlockTypeAdvisorToolResult      = "advisor_tool_result"
+	BlockTypeAdvisorResult          = "advisor_result"
+	BlockTypeAdvisorRedactedResult  = "advisor_redacted_result"
+	BlockTypeAdvisorResultError     = "advisor_tool_result_error"
 )
 
 // Tool represents a tool definition in the Anthropic API.
@@ -211,11 +247,82 @@ type Tool struct {
 	InputSchema  map[string]any `json:"input_schema,omitempty"`
 	CacheControl *CacheControl  `json:"cache_control,omitempty"`
 	DeferLoading bool           `json:"defer_loading,omitzero"`
+
+	// advisor_20260301 fields. Model names the advisor model the conversation
+	// is escalated to; MaxUses caps consultations per request; Caching is
+	// accepted and validated but only honored on a best-effort basis.
+	Model     string          `json:"model,omitempty"`
+	MaxUses   int             `json:"max_uses,omitzero"`
+	MaxTokens int             `json:"max_tokens,omitzero"`
+	Caching   *AdvisorCaching `json:"caching,omitempty"`
+}
+
+// AdvisorCaching is the advisor tool's caching configuration.
+type AdvisorCaching struct {
+	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
+}
+
+// Advisor caching TTL values accepted by the Anthropic API.
+const (
+	AdvisorCacheTTL5m = "5m"
+	AdvisorCacheTTL1h = "1h"
+)
+
+// IsValid reports whether the caching config is one the API would accept.
+func (c *AdvisorCaching) IsValid() bool {
+	if c == nil {
+		return true
+	}
+	if c.Type != "ephemeral" {
+		return false
+	}
+	return c.TTL == "" || c.TTL == AdvisorCacheTTL5m || c.TTL == AdvisorCacheTTL1h
 }
 
 // IsToolSearchTool reports whether this tool is a tool search tool definition.
 func (t Tool) IsToolSearchTool() bool {
 	return t.Type == ToolTypeSearchRegex || t.Type == ToolTypeSearchBM25
+}
+
+// IsAdvisorTool reports whether this tool is an advisor tool definition.
+func (t Tool) IsAdvisorTool() bool {
+	return t.Type == ToolTypeAdvisor
+}
+
+// IsServerTool reports whether this tool is a server-side tool that kirocc
+// emulates in-proxy and must never forward to the Kiro backend as a callable
+// function tool.
+func (t Tool) IsServerTool() bool {
+	return t.IsToolSearchTool() || t.IsAdvisorTool()
+}
+
+// CallableTools returns the tools that should be forwarded to the Kiro backend
+// as callable function tools, filtering out server-side tool definitions that
+// kirocc emulates itself. The result must be used for both tool conversion and
+// cache-point placement, which walk the tool list and the converted entries in
+// lockstep.
+func CallableTools(tools []Tool) []Tool {
+	if !slices.ContainsFunc(tools, Tool.IsServerTool) {
+		return tools
+	}
+	out := make([]Tool, 0, len(tools)-1)
+	for _, t := range tools {
+		if !t.IsServerTool() {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// FindAdvisorTool returns the advisor tool definition, if present.
+func FindAdvisorTool(tools []Tool) *Tool {
+	for i := range tools {
+		if tools[i].IsAdvisorTool() {
+			return &tools[i]
+		}
+	}
+	return nil
 }
 
 // SystemPrompt is a union type: either a plain string or []SystemBlock.

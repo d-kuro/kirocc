@@ -130,3 +130,57 @@ func setupCaptureTest(t *testing.T) *bytes.Buffer {
 	t.Cleanup(func() { slog.SetDefault(old) })
 	return &buf
 }
+
+// decodeResponse decodes a non-streaming JSON response body.
+func decodeResponse(t *testing.T, resp *http.Response) map[string]any {
+	t.Helper()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode response: %v\n%s", err, body)
+	}
+	return out
+}
+
+// textEvents is a scripted upstream round emitting a single text response.
+func textEvents(text string) []any {
+	return []any{
+		"assistantResponseEvent", mustJSON(map[string]string{"content": text}),
+	}
+}
+
+// historyText flattens a payload's history and current message (including
+// tool-result text/stdout) into one string for substring assertions.
+func historyText(p *kiroproto.Payload) string {
+	var parts []string
+	addResults := func(results []kiroproto.ToolResult) {
+		for _, tr := range results {
+			for _, c := range tr.Content {
+				parts = append(parts, c.Text)
+				if stdout, ok := c.JSON["stdout"].(string); ok {
+					parts = append(parts, stdout)
+				}
+			}
+		}
+	}
+	for _, e := range p.ConversationState.History {
+		if e.UserInputMessage != nil {
+			parts = append(parts, e.UserInputMessage.Content)
+			if mctx := e.UserInputMessage.UserInputMessageContext; mctx != nil {
+				addResults(mctx.ToolResults)
+			}
+		}
+		if e.AssistantResponseMessage != nil {
+			parts = append(parts, e.AssistantResponseMessage.Content)
+		}
+	}
+	cur := p.ConversationState.CurrentMessage.UserInputMessage
+	parts = append(parts, cur.Content)
+	if cur.UserInputMessageContext != nil {
+		addResults(cur.UserInputMessageContext.ToolResults)
+	}
+	return strings.Join(parts, "\n")
+}

@@ -25,6 +25,10 @@ type SSEWriter struct {
 	writeErr   error
 	acc        responseAccumulator
 
+	// advisorIterations accumulates advisor consultation usage across rounds;
+	// emitted as usage.iterations[] in the final message_delta.
+	advisorIterations []AdvisorIteration
+
 	// drainOnStop keeps the stream draining after an adapter-side stop when a
 	// completed tool call exists, so a trailing reasoningContentEvent blob
 	// (GPT 5.6) can still be captured. Set by the caller for models that emit
@@ -204,6 +208,9 @@ func (s *SSEWriter) Finish() error {
 	// response, the caller will detect it via IsEmptyVisibleEndTurn
 	// and retry the request instead.
 
+	if iters := IterationMaps(s.advisorIterations); iters != nil {
+		res.Usage["iterations"] = iters
+	}
 	s.writeSSE("message_delta", map[string]any{
 		"type": "message_delta",
 		"delta": map[string]any{
@@ -395,9 +402,14 @@ func (s *SSEWriter) ThinkingLen() int {
 	return s.acc.ThinkingBuf.Len()
 }
 
-// SetDropToolName sets the tool name to filter from accumulator recording.
-func (s *SSEWriter) SetDropToolName(name string) {
-	s.acc.DropToolName = name
+// HasToolUse reports whether a client-visible tool call was recorded this
+// round. Dropped server-tool calls are excluded, so this answers "does the
+// client still owe us a tool result".
+func (s *SSEWriter) HasToolUse() bool { return s.acc.HasToolUse }
+
+// SetDropToolNames sets the tool names to filter from accumulator recording.
+func (s *SSEWriter) SetDropToolNames(names ...string) {
+	s.acc.setDropToolNames(names)
 }
 
 // SetToolNameMap sets the short→original tool name map for response remapping.
@@ -408,10 +420,10 @@ func (s *SSEWriter) SetToolNameMap(m map[string]string) {
 // ResetAccumulator replaces the internal accumulator with a fresh one,
 // preserving the SSEWriter's block index and started state for continuation.
 func (s *SSEWriter) ResetAccumulator(contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int) {
-	filterName := s.acc.DropToolName
+	filterNames := s.acc.dropToolNames
 	nameMap := s.acc.toolNameMap
 	s.acc = newAccumulator(contextWindowSize, stopSequences, maxTokens, preCountedInputTokens)
-	s.acc.DropToolName = filterName
+	s.acc.dropToolNames = filterNames
 	s.acc.toolNameMap = nameMap
 	s.activeType = ""
 }

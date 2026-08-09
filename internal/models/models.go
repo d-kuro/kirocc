@@ -251,6 +251,77 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 	return kiroModel, thinking, contextWindowSize, anthropicModel
 }
 
+// ResolveKnown maps a model ID to its upstream Kiro SKU and Anthropic-form ID,
+// requiring an explicit mapping entry. Unlike Resolve it never passes an unknown
+// `claude-` ID through verbatim and never falls back to DefaultModel — callers
+// that escalate work to a specific model (advisor) must fail loudly rather than
+// silently route to a weaker one.
+//
+// The returned anthropicModel never carries the `[1m]` context-window marker:
+// it identifies the model for usage reporting, not the response's routed
+// context window.
+func ResolveKnown(model string) (kiroModel, anthropicModel string, ok bool) {
+	m, want1M, found := lookupMapping(model)
+	if !found {
+		return "", "", false
+	}
+	// An explicit `[1m]` request routes to the 1M-capable SKU when the mapping
+	// has one; never a silent downgrade to the 200k SKU.
+	kiroModel = m.Kiro
+	if want1M && m.Kiro1M != "" {
+		kiroModel = m.Kiro1M
+	}
+	alias := m.Anthropic
+	if alias == "" {
+		alias = m.Kiro
+	}
+	return kiroModel, strings.TrimSuffix(alias, ThinkingSuffix), true
+}
+
+// lookupMapping resolves a model ID to its mapping entry using the project's
+// two-tier precedence, shared with Resolve's matching half:
+//
+//  1. Exact match on the ID as written (so an always-1M alias like
+//     `claude-opus-4-7[1m]` wins over the bare row).
+//  2. Strip a trailing `[1m]` and retry, reporting want1M. Reasoning models
+//     (GPT 5.6) are excluded from this tier: they have no 1M variant and no
+//     thinking opt-in, so `gpt-5.6-sol[1m]` must not resolve.
+//
+// Within each tier an exact Anthropic-alias hit is preferred over a Kiro-SKU
+// hit, so a bare ID is not captured by a `[1m]` row sharing the same SKU.
+func lookupMapping(model string) (m Mapping, want1M, ok bool) {
+	model = normalizeThinkingSuffix(model)
+	base, stripped := strings.CutSuffix(model, ThinkingSuffix)
+
+	mappings := effectiveMappings()
+	find := func(candidate string, excludeReasoning bool) (Mapping, bool) {
+		eligible := func(m Mapping) bool {
+			return !excludeReasoning || !IsReasoningModel(m.Kiro)
+		}
+		for _, m := range mappings {
+			if candidate == m.Anthropic && eligible(m) {
+				return m, true
+			}
+		}
+		for _, m := range mappings {
+			if candidate == m.Kiro && eligible(m) {
+				return m, true
+			}
+		}
+		return Mapping{}, false
+	}
+
+	if m, found := find(model, false); found {
+		return m, false, true
+	}
+	if stripped {
+		if m, found := find(base, true); found {
+			return m, true, true
+		}
+	}
+	return Mapping{}, false, false
+}
+
 // ModelInfo is one entry served by /v1/models.
 type ModelInfo struct {
 	ID          string

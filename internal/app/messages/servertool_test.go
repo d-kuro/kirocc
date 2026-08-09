@@ -70,7 +70,7 @@ func TestParseToolSearchInput(t *testing.T) {
 }
 
 func TestAppendSearchMessages_RedactedThinkingReplay(t *testing.T) {
-	o := &toolSearchOrchestrator{}
+	o := &serverToolOrchestrator{}
 	nameMap := reqconv.NewToolNameMap()
 
 	tests := []struct {

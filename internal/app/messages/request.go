@@ -40,10 +40,20 @@ func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 	ccSessionID := r.Header.Get(headerCCSessionID)
 
 	// Mirror the live send path so token counts include effort (envState is
-	// derived inside BuildPayload from the system prompt).
+	// derived inside BuildPayload from the system prompt) and the same tool
+	// entries: server-side tool definitions are filtered and replaced by their
+	// synthetic Kiro tools exactly as the live /v1/messages payload does.
 	effort := resolveEffort(r.Context(), kiroModel, req, thinking)
+	tsCtx, advCtx := newServerToolContexts(req)
 
-	payload, _, err := reqconv.BuildPayload(req, reqconv.BuildOptions{ProfileARN: profileARN, ModelID: kiroModel, ConversationID: ccSessionID, Effort: effort})
+	payload, _, err := reqconv.BuildPayload(req, reqconv.BuildOptions{
+		ProfileARN:     profileARN,
+		ModelID:        kiroModel,
+		ConversationID: ccSessionID,
+		Effort:         effort,
+		ToolSearchCtx:  tsCtx,
+		AdvisorCtx:     advCtx,
+	})
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 		return
