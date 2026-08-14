@@ -76,11 +76,10 @@ func TestSetCatalog_DiscoveredModelResolves(t *testing.T) {
 			wantAnthropicModel: "claude-opus-9[1m]",
 		},
 		{
-			name:               "context1M header still enables thinking",
+			name:               "context1M header advertises 1m without enabling thinking",
 			model:              "claude-opus-9",
 			context1M:          true,
 			wantKiroModel:      "claude-opus-9",
-			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
 			wantAnthropicModel: "claude-opus-9[1m]",
 		},
@@ -193,11 +192,19 @@ func TestSetCatalog_ListModelsIncludesDiscovered(t *testing.T) {
 
 	got := ListModels()
 	ids := make([]string, 0, len(got))
+	names := make(map[string]string, len(got))
 	for _, m := range got {
 		ids = append(ids, m.ID)
+		names[m.ID] = m.DisplayName
 	}
 	if !slices.Contains(ids, "claude-opus-9") {
 		t.Errorf("ListModels() = %v, missing claude-opus-9", ids)
+	}
+	// Discovered always-1M models get a [1m] alias row; it must be advertised
+	// so Claude Code's picker can select the 1M context window, and labelled so
+	// it does not show up as a bare suffixed ID next to the built-ins.
+	if want := "claude-opus-9 (1M context)"; names["claude-opus-9[1m]"] != want {
+		t.Errorf("ListModels() claude-opus-9[1m] display name = %q, want %q", names["claude-opus-9[1m]"], want)
 	}
 	if slices.Contains(ids, "gpt-9-nova") {
 		t.Errorf("ListModels() = %v, discovery must not add non-claude models", ids)

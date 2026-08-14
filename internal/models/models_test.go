@@ -2,6 +2,7 @@ package models
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -38,11 +39,10 @@ func TestResolve(t *testing.T) {
 			wantAnthropicModel: "claude-opus-5[1m]",
 		},
 		{
-			name:               "claude-opus-5 with context1M enables thinking",
+			name:               "claude-opus-5 with context1M keeps thinking off",
 			model:              "claude-opus-5",
 			context1M:          true,
 			wantKiroModel:      "claude-opus-5",
-			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
 			wantAnthropicModel: "claude-opus-5[1m]",
 		},
@@ -61,11 +61,10 @@ func TestResolve(t *testing.T) {
 			wantAnthropicModel: "claude-opus-4-8[1m]",
 		},
 		{
-			name:               "claude-opus-4-8 with context1M",
+			name:               "claude-opus-4-8 with context1M keeps thinking off",
 			model:              "claude-opus-4-8",
 			context1M:          true,
 			wantKiroModel:      "claude-opus-4.8",
-			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
 			wantAnthropicModel: "claude-opus-4-8[1m]",
 		},
@@ -92,11 +91,10 @@ func TestResolve(t *testing.T) {
 			wantAnthropicModel: "claude-opus-4-7[1m]",
 		},
 		{
-			name:               "claude-opus-4-7 with context1M",
+			name:               "claude-opus-4-7 with context1M keeps thinking off",
 			model:              "claude-opus-4-7",
 			context1M:          true,
 			wantKiroModel:      "claude-opus-4.7",
-			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
 			wantAnthropicModel: "claude-opus-4-7[1m]",
 		},
@@ -123,11 +121,10 @@ func TestResolve(t *testing.T) {
 			wantAnthropicModel: "claude-opus-4-6[1m]",
 		},
 		{
-			name:               "claude-opus-4-6 with context1M",
+			name:               "claude-opus-4-6 with context1M keeps thinking off",
 			model:              "claude-opus-4-6",
 			context1M:          true,
 			wantKiroModel:      "claude-opus-4.6",
-			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
 			wantAnthropicModel: "claude-opus-4-6[1m]",
 		},
@@ -153,11 +150,10 @@ func TestResolve(t *testing.T) {
 			wantAnthropicModel: "claude-sonnet-5[1m]",
 		},
 		{
-			name:               "claude-sonnet-5 with context1M enables thinking",
+			name:               "claude-sonnet-5 with context1M keeps thinking off",
 			model:              "claude-sonnet-5",
 			context1M:          true,
 			wantKiroModel:      "claude-sonnet-5",
-			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
 			wantAnthropicModel: "claude-sonnet-5[1m]",
 		},
@@ -192,11 +188,10 @@ func TestResolve(t *testing.T) {
 			wantAnthropicModel: "claude-sonnet-4-6[1m]",
 		},
 		{
-			name:               "claude-sonnet-4-6 with context1M resolves to 1m",
+			name:               "claude-sonnet-4-6 with context1M resolves to 1m without thinking",
 			model:              "claude-sonnet-4-6",
 			context1M:          true,
 			wantKiroModel:      "claude-sonnet-4.6-1m",
-			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
 			wantAnthropicModel: "claude-sonnet-4-6[1m]",
 		},
@@ -224,11 +219,10 @@ func TestResolve(t *testing.T) {
 			wantAnthropicModel: "claude-haiku-4.5",
 		},
 		{
-			name:               "claude-haiku-4.5 with context1M no 1m variant",
+			name:               "claude-haiku-4.5 with context1M no 1m variant keeps thinking off",
 			model:              "claude-haiku-4.5",
 			context1M:          true,
 			wantKiroModel:      "claude-haiku-4.5",
-			wantThinking:       true,
 			wantContextWindow:  DefaultContextWindowSize,
 			wantAnthropicModel: "claude-haiku-4.5",
 		},
@@ -360,6 +354,27 @@ func TestResolve(t *testing.T) {
 			wantContextWindow:  ThinkingContextWindowSize,
 			wantAnthropicModel: "custom-1m[1m]",
 		},
+		{
+			// A row that spells `[1m]` in its own ID exists to advertise 1M, so
+			// the exact-match tier must still switch to the separate 1M SKU —
+			// without turning thinking on, since the ID itself carried no opt-in
+			// beyond the window.
+			name:               "env override suffixed row routes to its separate 1m SKU",
+			envMappings:        `[{"anthropic":"custom[1m]","kiro":"claude-custom","kiro_1m":"claude-custom-1m"}]`,
+			model:              "custom[1m]",
+			wantKiroModel:      "claude-custom-1m",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "custom[1m]",
+		},
+		{
+			// Same row, requested in the case Claude Code sometimes emits.
+			name:               "env override suffixed row matches an upper-case request",
+			envMappings:        `[{"anthropic":"custom[1M]","kiro":"claude-custom","kiro_1m":"claude-custom-1m"}]`,
+			model:              "custom[1M]",
+			wantKiroModel:      "claude-custom-1m",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "custom[1m]",
+		},
 	}
 
 	for _, tt := range tests {
@@ -448,30 +463,115 @@ func TestListModels(t *testing.T) {
 	}
 }
 
-func TestListModels_DiscoveryAliasDisplayNames(t *testing.T) {
+// The display names drive Claude Code's model picker, and the `[1m]` IDs are
+// what make it track the 1M window (it matches /\[1m\]/i on the session model
+// string client-side).
+func TestListModels_DisplayNames(t *testing.T) {
 	t.Setenv("KIROCC_MODEL_MAPPINGS", "")
 
-	wantNames := map[string]string{
-		"claude-gpt-5.6-sol":   "GPT 5.6 Sol",
-		"claude-gpt-5.6-terra": "GPT 5.6 Terra",
-		"claude-gpt-5.6-luna":  "GPT 5.6 Luna",
-		// Canonical IDs carry no display name.
-		"gpt-5.6-sol":   "",
-		"claude-opus-5": "",
+	tests := []struct {
+		id         string
+		want       string // expected display_name ("" = advertised unlabelled)
+		wantAbsent bool
+	}{
+		// Discovery aliases for the non-claude models.
+		{id: "claude-gpt-5.6-sol", want: "GPT 5.6 Sol"},
+		{id: "claude-gpt-5.6-terra", want: "GPT 5.6 Terra"},
+		{id: "claude-gpt-5.6-luna", want: "GPT 5.6 Luna"},
+		// Canonical SKUs are advertised unlabelled.
+		{id: "gpt-5.6-sol"},
+		{id: "claude-opus-5"},
+		// Always-1M models: one labelled `[1m]` entry each.
+		{id: "claude-opus-5[1m]", want: "Opus 5 (1M context)"},
+		{id: "claude-opus-4-8[1m]", want: "Opus 4.8 (1M context)"},
+		{id: "claude-opus-4-7[1m]", want: "Opus 4.7 (1M context)"},
+		{id: "claude-opus-4-6[1m]", want: "Opus 4.6 (1M context)"},
+		{id: "claude-sonnet-5[1m]", want: "Sonnet 5 (1M context)"},
+		// Separate 1M SKU: both windows are pickable.
+		{id: "claude-sonnet-4-6", want: "Sonnet 4.6"},
+		{id: "claude-sonnet-4-6[1m]", want: "Sonnet 4.6 (1M context)"},
+		// An unnamed row stays out of the picker, `[1m]` alias included.
+		{id: "claude-sonnet-4.5[1m]", wantAbsent: true},
 	}
+
 	got := make(map[string]string)
 	for _, m := range ListModels() {
 		got[m.ID] = m.DisplayName
 	}
-	for id, want := range wantNames {
-		name, ok := got[id]
-		if !ok {
-			t.Errorf("ListModels missing %q", id)
-			continue
+
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			name, ok := got[tt.id]
+			switch {
+			case tt.wantAbsent:
+				if ok {
+					t.Errorf("ListModels advertises %q, want it absent", tt.id)
+				}
+			case !ok:
+				t.Errorf("ListModels missing %q", tt.id)
+			case name != tt.want:
+				t.Errorf("ListModels %q display name = %q, want %q", tt.id, name, tt.want)
+			}
+		})
+	}
+}
+
+// An env override may spell the suffix in either case, so the suffix test must
+// match case-insensitively — otherwise the row reads as unsuffixed and gets a
+// second suffix appended.
+func TestListModels_UppercaseSuffixOverrideIsNotDoubleSuffixed(t *testing.T) {
+	t.Setenv("KIROCC_MODEL_MAPPINGS",
+		`[{"anthropic":"custom[1M]","kiro":"claude-custom","kiro_1m":"claude-custom-1m","display_name":"Custom"}]`)
+
+	for _, m := range ListModels() {
+		if strings.Contains(strings.ToLower(m.ID), "[1m][1m]") {
+			t.Errorf("ListModels advertises double-suffixed ID %q", m.ID)
 		}
-		if name != want {
-			t.Errorf("ListModels %q display name = %q, want %q", id, name, want)
-		}
+	}
+}
+
+// The published ID set must agree with what Resolve can actually route.
+// /v1/models is a promise: a `[1m]` entry that resolves to the 200k window, or
+// any entry that matches no mapping at all (so Resolve falls back), offers the
+// picker a choice kirocc cannot honour.
+func TestListModels_AdvertisedIDsResolveAsAdvertised(t *testing.T) {
+	tests := []struct {
+		name        string
+		envMappings string
+	}{
+		{
+			name: "built-ins only",
+		},
+		{
+			// The override shadows the built-in claude-sonnet-4-6 row and has no
+			// 1M SKU, so the built-in's `[1m]` alias can no longer be delivered.
+			name:        "override shadows a mapping that has a 1M SKU",
+			envMappings: `[{"anthropic":"claude-sonnet-4-6","kiro":"claude-pinned"}]`,
+		},
+		{
+			// Resolve normalizes the request before comparing, so an ID
+			// advertised with an upper-case suffix would never match its own row.
+			name:        "override spells the suffix in upper case",
+			envMappings: `[{"anthropic":"custom[1M]","kiro":"claude-custom","kiro_1m":"claude-custom-1m","display_name":"Custom"}]`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KIROCC_MODEL_MAPPINGS", tt.envMappings)
+
+			for _, m := range ListModels() {
+				if _, _, ok := lookupMapping(m.ID); !ok {
+					t.Errorf("advertised %q matches no mapping, so Resolve falls back", m.ID)
+				}
+				if !hasThinkingSuffix(m.ID) {
+					continue
+				}
+				if _, _, window, _ := Resolve(m.ID, false); window != ThinkingContextWindowSize {
+					t.Errorf("advertised %q resolves to a %d window, want %d", m.ID, window, ThinkingContextWindowSize)
+				}
+			}
+		})
 	}
 }
 

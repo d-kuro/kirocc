@@ -13,7 +13,7 @@ func TestResolveEffort(t *testing.T) {
 		name         string
 		kiroModel    string
 		effort       string // request output_config.effort
-		thinking     bool   // resolved thinking flag (type/[1m]/context-1m)
+		thinking     bool   // resolved thinking flag (type/[1m])
 		want         string
 		thinkingType string // request thinking.type ("" = absent)
 	}{

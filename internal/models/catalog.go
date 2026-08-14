@@ -63,12 +63,16 @@ func SetCatalog(discovered []CatalogModel) []string {
 			// An always-1M SKU: no separate -1m variant exists, so Kiro1M is the
 			// SKU itself and the `[1m]` alias is a context-window advertisement
 			// that must not turn thinking on (matching the built-in opus rows).
+			// It carries a display name so the picker labels it like a built-in
+			// 1M entry instead of showing a bare suffixed ID; there is no
+			// friendly name for a model this build predates, so the ID stands in.
 			entry.Kiro1M = d.ID
 			mappings = append(mappings, Mapping{
 				Anthropic:         alias + ThinkingSuffix,
 				Kiro:              d.ID,
 				Kiro1M:            d.ID,
 				ContextWindowSize: d.MaxInputTokens,
+				DisplayName:       alias,
 			})
 		}
 		mappings = append(mappings, entry)
