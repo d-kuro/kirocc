@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -129,29 +130,50 @@ func TestApplyEnvOverrides_KeepAliveInterval(t *testing.T) {
 
 func TestDefaultDBPathFor(t *testing.T) {
 	tests := []struct {
-		name string
-		goos string
-		home string
-		want string
+		name         string
+		goos         string
+		home         string
+		localAppData string
+		want         string
 	}{
 		{
 			name: "darwin",
 			goos: "darwin",
 			home: "/Users/dkuro",
-			want: "/Users/dkuro/Library/Application Support/kiro-cli/data.sqlite3",
+			want: filepath.Join(
+				"/Users/dkuro", "Library", "Application Support", "kiro-cli", "data.sqlite3",
+			),
 		},
 		{
 			name: "linux",
 			goos: "linux",
 			home: "/home/dkuro",
-			want: "/home/dkuro/.local/share/kiro-cli/data.sqlite3",
+			want: filepath.Join(
+				"/home/dkuro", ".local", "share", "kiro-cli", "data.sqlite3",
+			),
+		},
+		{
+			name:         "windows",
+			goos:         "windows",
+			home:         `C:\Users\dkuro`,
+			localAppData: `D:\Profiles\dkuro\AppData\Local`,
+			want: filepath.Join(
+				`D:\Profiles\dkuro\AppData\Local`, "kiro-cli", "data.sqlite3",
+			),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := DefaultDBPathFor(tt.goos, tt.home); got != tt.want {
-				t.Fatalf("DefaultDBPathFor(%q, %q) = %q, want %q", tt.goos, tt.home, got, tt.want)
+			if got := DefaultDBPathFor(tt.goos, tt.home, tt.localAppData); got != tt.want {
+				t.Fatalf(
+					"DefaultDBPathFor(%q, %q, %q) = %q, want %q",
+					tt.goos,
+					tt.home,
+					tt.localAppData,
+					got,
+					tt.want,
+				)
 			}
 		})
 	}

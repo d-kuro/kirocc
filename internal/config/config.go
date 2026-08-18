@@ -58,18 +58,28 @@ const maxRegionLen = 64
 
 // DefaultDBPath returns the default kiro-cli SQLite database location.
 func DefaultDBPath() string {
+	if runtime.GOOS == "windows" {
+		localAppData, err := os.UserCacheDir()
+		if err != nil {
+			return ""
+		}
+		return DefaultDBPathFor(runtime.GOOS, "", localAppData)
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return DefaultDBPathFor(runtime.GOOS, home)
+	return DefaultDBPathFor(runtime.GOOS, home, "")
 }
 
-// DefaultDBPathFor returns the default database location for the given OS and home directory.
-func DefaultDBPathFor(goos, home string) string {
+// DefaultDBPathFor returns the default database location for the given OS and user directories.
+func DefaultDBPathFor(goos, home, localAppData string) string {
 	switch goos {
 	case "darwin":
 		return filepath.Join(home, "Library", "Application Support", "kiro-cli", "data.sqlite3")
+	case "windows":
+		return filepath.Join(localAppData, "kiro-cli", "data.sqlite3")
 	default:
 		return filepath.Join(home, ".local", "share", "kiro-cli", "data.sqlite3")
 	}

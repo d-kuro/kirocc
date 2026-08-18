@@ -123,10 +123,11 @@ API keys are available for Kiro Pro, Pro+, Pro Max, and Power subscribers. On gr
 
 #### Default DB path
 
-| OS    | Path                                                  |
-| ----- | ----------------------------------------------------- |
-| macOS | `~/Library/Application Support/kiro-cli/data.sqlite3` |
-| Linux | `~/.local/share/kiro-cli/data.sqlite3`                |
+| OS      | Path                                                  |
+| ------- | ----------------------------------------------------- |
+| macOS   | `~/Library/Application Support/kiro-cli/data.sqlite3` |
+| Linux   | `~/.local/share/kiro-cli/data.sqlite3`                |
+| Windows | `%LOCALAPPDATA%\kiro-cli\data.sqlite3`               |
 
 ### Environment variables
 
