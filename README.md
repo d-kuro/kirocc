@@ -111,6 +111,7 @@ API keys are available for Kiro Pro, Pro+, Pro Max, and Power subscribers. On gr
 | `-kiro-api-region`    | (credential's region)     | Region for Kiro API endpoints (`runtime.<region>.kiro.dev`)         |
 | `-model-discovery`    | `true`                    | Fetch Kiro's model catalog at startup                               |
 | `-keepalive-interval` | `15s`                     | SSE idle keep-alive interval (0 = disabled)                         |
+| `-max-request-bytes`  | `33554432`                | Max accepted client request body size in bytes (0 = unlimited)      |
 | `-debug`              | `false`                   | Enable debug logging                                                |
 | `-log-file`           | (none)                    | Write logs to file with rotation (file-only by default)             |
 | `-log-max-size`       | `10`                      | Max log file size in MB before rotation                             |
@@ -142,6 +143,7 @@ Command-line options can be overridden with environment variables.
 | `KIRO_API_REGION`           | `-kiro-api-region`    |
 | `KIROCC_MODEL_DISCOVERY`    | `-model-discovery`    |
 | `KIROCC_KEEPALIVE_INTERVAL` | `-keepalive-interval` |
+| `KIROCC_MAX_REQUEST_BYTES`  | `-max-request-bytes`  |
 | `KIROCC_DEBUG`              | `-debug`              |
 | `KIROCC_LOG_FILE`           | `-log-file`           |
 | `KIROCC_LOG_MAX_SIZE`       | `-log-max-size`       |
@@ -153,6 +155,12 @@ Command-line options can be overridden with environment variables.
 | `KIROCC_OTEL_BODY_LIMIT`    | `-otel-body-limit`    |
 
 `KIRO_API_KEY` and `KIRO_API_REGION` intentionally keep Kiro's own names rather than the `KIROCC_` prefix, so a machine already configured for headless kiro-cli needs no kirocc-specific setup.
+
+#### Request body size
+
+`-max-request-bytes` defaults to 32 MiB, matching the size the Anthropic Messages API accepts. Images are what push a conversation toward it: a request carries the whole conversation, so every screenshot sent earlier is re-sent on every subsequent turn and the body only grows. Past the cap kirocc answers `413 request_too_large` naming the actual size and the limit.
+
+Retrying cannot help — the next attempt sends the same oversized body. Run `/compact` (or `/clear`) to drop the image blocks from history, or raise the limit.
 
 ### Custom API region
 

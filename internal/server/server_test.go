@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json/v2"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -558,6 +559,90 @@ func TestGetModels_GPTModelsListedOnce(t *testing.T) {
 		if counts[id] != 1 {
 			t.Errorf("model %q listed %d times, want exactly 1", id, counts[id])
 		}
+	}
+}
+
+func TestPostMessages_RequestTooLarge(t *testing.T) {
+	const limit = 200
+	mgr := &mockAuthManager{
+		creds: &auth.Credentials{
+			AccessToken: "test-token",
+			ProfileARN:  "arn:test",
+			Region:      "us-east-1",
+		},
+	}
+	s := New(mgr, "", &mockKiroClient{}, WithMaxRequestBytes(limit))
+	srv := newTCP4TestServer(t, s.Handler())
+	defer srv.Close()
+
+	pad := strings.Repeat("a", 1000)
+	oversized := `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"` + pad + `"}]}`
+
+	// Deliberately no X-Claude-Code-Session-Id header: the size check must run
+	// before the session-header check so an oversized request is diagnosable
+	// without the client having to get anything else right first.
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages", strings.NewReader(oversized))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want %d, body = %s", resp.StatusCode, http.StatusRequestEntityTooLarge, body)
+	}
+
+	var payload struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.UnmarshalRead(resp.Body, &payload); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if payload.Error.Type != "request_too_large" {
+		t.Errorf("error.type = %q, want %q", payload.Error.Type, "request_too_large")
+	}
+	if !strings.Contains(payload.Error.Message, fmt.Sprint(len(oversized))) {
+		t.Errorf("message %q should name the observed size %d", payload.Error.Message, len(oversized))
+	}
+	if !strings.Contains(payload.Error.Message, fmt.Sprint(limit)) {
+		t.Errorf("message %q should name the configured limit %d", payload.Error.Message, limit)
+	}
+}
+
+func TestPostMessages_UnderLimit_NotRequestTooLarge(t *testing.T) {
+	const limit = 1 << 20 // 1 MiB, well over the small test body below
+	mgr := &mockAuthManager{
+		creds: &auth.Credentials{
+			AccessToken: "test-token",
+			ProfileARN:  "arn:test",
+			Region:      "us-east-1",
+		},
+	}
+	client := &mockKiroClient{
+		handler: func(ctx context.Context, token string, payload *kiroproto.Payload, region string) (*kiroclient.Response, error) {
+			p, _ := json.Marshal(map[string]string{"content": "ok"})
+			body := buildEventStream("assistantResponseEvent", p)
+			return &kiroclient.Response{StatusCode: 200, Body: body, Header: http.Header{}}, nil
+		},
+	}
+	s := New(mgr, "", client, WithMaxRequestBytes(limit))
+	srv := newTCP4TestServer(t, s.Handler())
+	defer srv.Close()
+
+	resp := postMessages(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusRequestEntityTooLarge {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want != %d, body = %s", resp.StatusCode, http.StatusRequestEntityTooLarge, body)
 	}
 }
 

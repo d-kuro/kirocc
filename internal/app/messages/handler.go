@@ -21,10 +21,10 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	traceID, short := logging.TraceIDs(ctx)
 
-	req, err := parseAndValidateRequest(ctx, w, r)
+	req, bodyBytes, err := s.parseAndValidateRequest(ctx, w, r)
 	if err != nil {
-		slog.WarnContext(ctx, "invalid request", "trace_id", short, "err", err)
-		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
+		slog.WarnContext(ctx, "invalid request", "trace_id", short, "body_bytes", bodyBytes, "err", err)
+		writeRequestError(w, err)
 		return
 	}
 
@@ -54,7 +54,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		thinking = true
 	}
 
-	s.logRequest(ctx, short, ccSessionID, kiroModel, contextWindowSize, req, thinking)
+	s.logRequest(ctx, short, ccSessionID, kiroModel, contextWindowSize, req, thinking, bodyBytes)
 
 	effort := resolveEffort(ctx, kiroModel, req, thinking)
 
@@ -99,7 +99,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 // logRequest emits the "--> POST /v1/messages" info log summarizing the call.
-func (s *Service) logRequest(ctx context.Context, short, ccSessionID, kiroModel string, contextWindowSize int, req *anthropic.Request, thinking bool) {
+func (s *Service) logRequest(ctx context.Context, short, ccSessionID, kiroModel string, contextWindowSize int, req *anthropic.Request, thinking bool, bodyBytes int64) {
 	var thinkingLog any = false
 	if thinking {
 		if effort := req.Effort(); effort != "" {
@@ -115,6 +115,7 @@ func (s *Service) logRequest(ctx context.Context, short, ccSessionID, kiroModel 
 		"thinking", thinkingLog,
 		"stream", req.Stream,
 		"context_window", formatContextWindow(contextWindowSize),
+		"body_bytes", bodyBytes,
 	)
 }
 

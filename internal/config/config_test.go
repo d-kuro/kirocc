@@ -257,12 +257,52 @@ func TestConfig_Validate(t *testing.T) {
 		{"region with userinfo injection", Config{Host: "127.0.0.1", Port: 3456, KiroAPIRegion: "a@evil.com"}, true},
 		{"region with leading hyphen", Config{Host: "127.0.0.1", Port: 3456, KiroAPIRegion: "-us-east-1"}, true},
 		{"region too long", Config{Host: "127.0.0.1", Port: 3456, KiroAPIRegion: strings.Repeat("a", maxRegionLen+1)}, true},
+		{"max-request-bytes zero", Config{Host: "127.0.0.1", Port: 3456, MaxRequestBytes: 0}, false},
+		{"max-request-bytes positive", Config{Host: "127.0.0.1", Port: 3456, MaxRequestBytes: 1024}, false},
+		{"max-request-bytes negative", Config{Host: "127.0.0.1", Port: 3456, MaxRequestBytes: -1}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.cfg.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() err = %v, wantErr = %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestApplyEnvOverrides_MaxRequestBytes(t *testing.T) {
+	tests := []struct {
+		name         string
+		value        string
+		initial      int
+		want         int
+		wantApplyErr bool
+		wantValidErr bool
+	}{
+		{name: "override", value: "1048576", initial: DefaultMaxRequestBytes, want: 1048576},
+		{name: "disabled", value: "0", initial: DefaultMaxRequestBytes, want: 0},
+		{name: "negative", value: "-1", initial: DefaultMaxRequestBytes, want: -1, wantValidErr: true},
+		{name: "invalid", value: "not-a-number", initial: DefaultMaxRequestBytes, want: DefaultMaxRequestBytes, wantApplyErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KIROCC_MAX_REQUEST_BYTES", tt.value)
+			cfg := Config{Host: "127.0.0.1", Port: 3456, MaxRequestBytes: tt.initial}
+
+			err := ApplyEnvOverrides(&cfg)
+			if (err != nil) != tt.wantApplyErr {
+				t.Fatalf("ApplyEnvOverrides() err = %v, wantApplyErr = %v", err, tt.wantApplyErr)
+			}
+			if tt.wantApplyErr {
+				return
+			}
+			if cfg.MaxRequestBytes != tt.want {
+				t.Fatalf("MaxRequestBytes = %v, want %v", cfg.MaxRequestBytes, tt.want)
+			}
+			if err := cfg.Validate(); (err != nil) != tt.wantValidErr {
+				t.Fatalf("Validate() err = %v, wantValidErr = %v", err, tt.wantValidErr)
 			}
 		})
 	}

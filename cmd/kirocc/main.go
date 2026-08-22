@@ -123,6 +123,7 @@ func parseFlags(args []string) (config.Config, error) {
 	fs.BoolVar(&cfg.Debug, "debug", false, "enable debug logging with OTel JSON Lines output")
 	fs.BoolVar(&cfg.OTel, "otel", false, "enable OpenTelemetry tracing (OTLP HTTP exporter)")
 	fs.IntVar(&cfg.OTelBodyLimit, "otel-body-limit", config.DefaultOTelBodyLimit, "max bytes of request body to capture in OTel spans (0 = unlimited)")
+	fs.IntVar(&cfg.MaxRequestBytes, "max-request-bytes", config.DefaultMaxRequestBytes, "max accepted client request body size in bytes (0 = unlimited); also KIROCC_MAX_REQUEST_BYTES")
 	fs.DurationVar(&cfg.KeepAliveInterval, "keepalive-interval", config.DefaultKeepAliveInterval, "SSE idle keep-alive interval (0 = disabled)")
 	fs.StringVar(&cfg.LogFile.Path, "log-file", "", "write logs to file with rotation (for agent debugging)")
 	fs.IntVar(&cfg.LogFile.MaxSize, "log-max-size", logging.DefaultLogMaxSize, "max log file size in MB before rotation")
@@ -219,7 +220,10 @@ func discoverModels(ctx context.Context, authMgr *auth.AuthManager, regionOverri
 }
 
 func buildServer(authMgr *auth.AuthManager, client kiroclient.Client, cfg config.Config) *server.Server {
-	opts := []server.ServerOption{server.WithKeepAliveInterval(cfg.KeepAliveInterval)}
+	opts := []server.ServerOption{
+		server.WithKeepAliveInterval(cfg.KeepAliveInterval),
+		server.WithMaxRequestBytes(cfg.MaxRequestBytes),
+	}
 	if cfg.OTel {
 		opts = append(opts, server.WithOTel(cfg.OTelBodyLimit))
 	}

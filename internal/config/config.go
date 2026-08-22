@@ -15,6 +15,12 @@ import (
 const (
 	// DefaultOTelBodyLimit is the default max bytes of request body to capture in OTel spans.
 	DefaultOTelBodyLimit = 32 * 1024
+	// DefaultMaxRequestBytes is the default max accepted client request body
+	// size. It matches the 32 MB the Anthropic Messages API accepts, which is
+	// what clients budget against: an image-heavy conversation resends every
+	// prior image block on every turn, so a lower proxy-side cap wedges a
+	// session that upstream would have served.
+	DefaultMaxRequestBytes = 32 << 20
 	// DefaultKeepAliveInterval is the default idle time between SSE keep-alive comments.
 	DefaultKeepAliveInterval = 15 * time.Second
 )
@@ -39,10 +45,13 @@ type Config struct {
 	// ModelDiscovery enables fetching Kiro's model catalog at startup so newly
 	// launched models resolve without a kirocc release. Built-in mappings always
 	// win; discovery only fills gaps.
-	ModelDiscovery    bool
-	Debug             bool
-	OTel              bool
-	OTelBodyLimit     int
+	ModelDiscovery bool
+	Debug          bool
+	OTel           bool
+	OTelBodyLimit  int
+	// MaxRequestBytes caps the client request body kirocc will read. 0 means
+	// unlimited.
+	MaxRequestBytes   int
 	KeepAliveInterval time.Duration
 	LogFile           logging.LogFileConfig
 }
@@ -99,6 +108,9 @@ func ApplyEnvOverrides(cfg *Config) error {
 	if err := applyInt("KIROCC_OTEL_BODY_LIMIT", &cfg.OTelBodyLimit); err != nil {
 		return err
 	}
+	if err := applyInt("KIROCC_MAX_REQUEST_BYTES", &cfg.MaxRequestBytes); err != nil {
+		return err
+	}
 	if err := applyDuration("KIROCC_KEEPALIVE_INTERVAL", &cfg.KeepAliveInterval); err != nil {
 		return err
 	}
@@ -133,6 +145,9 @@ func (c *Config) Validate() error {
 	}
 	if c.OTelBodyLimit < 0 {
 		return fmt.Errorf("otel-body-limit must be >= 0, got %d", c.OTelBodyLimit)
+	}
+	if c.MaxRequestBytes < 0 {
+		return fmt.Errorf("max-request-bytes must be >= 0, got %d", c.MaxRequestBytes)
 	}
 	if c.KeepAliveInterval != 0 && c.KeepAliveInterval < time.Second {
 		return fmt.Errorf("keepalive-interval must be 0 or >= 1s, got %s", c.KeepAliveInterval)

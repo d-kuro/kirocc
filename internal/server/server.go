@@ -31,6 +31,12 @@ func WithKeepAliveInterval(interval time.Duration) ServerOption {
 	return func(s *Server) { s.keepAliveInterval = interval }
 }
 
+// WithMaxRequestBytes caps the client request body the messages service reads.
+// Zero means unlimited.
+func WithMaxRequestBytes(n int) ServerOption {
+	return func(s *Server) { s.maxRequestBytes = n }
+}
+
 // Server is the HTTP server for the kirocc proxy.
 type Server struct {
 	apiKey            string
@@ -38,6 +44,7 @@ type Server struct {
 	otelBodyLimit     int
 	captureEnabled    bool
 	keepAliveInterval time.Duration
+	maxRequestBytes   int
 	mux               *http.ServeMux
 	messages          *messagesapp.Service
 }
@@ -54,6 +61,7 @@ func New(authMgr messagesapp.TokenGetter, apiKey string, client kiroclient.Clien
 	s.messages = messagesapp.New(authMgr, client,
 		messagesapp.WithCapture(s.captureEnabled),
 		messagesapp.WithKeepAliveInterval(s.keepAliveInterval),
+		messagesapp.WithMaxRequestBytes(s.maxRequestBytes),
 	)
 	s.registerRoutes()
 	return s

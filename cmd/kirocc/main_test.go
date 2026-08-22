@@ -92,3 +92,38 @@ func TestParseFlags_KeepAliveInterval(t *testing.T) {
 		}
 	})
 }
+
+func TestParseFlags_MaxRequestBytes(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		cfg, err := parseFlags(nil)
+		if err != nil {
+			t.Fatalf("parseFlags: %v", err)
+		}
+		if cfg.MaxRequestBytes != config.DefaultMaxRequestBytes {
+			t.Fatalf("MaxRequestBytes = %v, want %v", cfg.MaxRequestBytes, config.DefaultMaxRequestBytes)
+		}
+		if cfg.MaxRequestBytes != 32<<20 {
+			t.Fatalf("MaxRequestBytes = %v, want %v", cfg.MaxRequestBytes, 32<<20)
+		}
+	})
+
+	t.Run("flag", func(t *testing.T) {
+		cfg, err := parseFlags([]string{"-max-request-bytes", "1048576"})
+		if err != nil {
+			t.Fatalf("parseFlags: %v", err)
+		}
+		if cfg.MaxRequestBytes != 1048576 {
+			t.Fatalf("MaxRequestBytes = %v, want 1048576", cfg.MaxRequestBytes)
+		}
+	})
+
+	t.Run("zero means unlimited", func(t *testing.T) {
+		cfg, err := parseFlags([]string{"-max-request-bytes", "0"})
+		if err != nil {
+			t.Fatalf("parseFlags: %v", err)
+		}
+		if cfg.MaxRequestBytes != 0 {
+			t.Fatalf("MaxRequestBytes = %v, want 0", cfg.MaxRequestBytes)
+		}
+	})
+}

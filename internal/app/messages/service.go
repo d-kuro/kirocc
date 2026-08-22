@@ -19,6 +19,7 @@ type Service struct {
 	client            kiroclient.Client
 	captureEnabled    bool
 	keepAliveInterval time.Duration
+	maxRequestBytes   int
 }
 
 // Option configures a Service.
@@ -35,6 +36,12 @@ func WithCapture(enabled bool) Option {
 // A zero duration disables the heartbeat.
 func WithKeepAliveInterval(interval time.Duration) Option {
 	return func(s *Service) { s.keepAliveInterval = interval }
+}
+
+// WithMaxRequestBytes caps the client request body the service will read.
+// Zero means unlimited.
+func WithMaxRequestBytes(n int) Option {
+	return func(s *Service) { s.maxRequestBytes = n }
 }
 
 // New constructs a message service.
