@@ -82,8 +82,7 @@ func classifyUpstreamError(isException bool, invalidReason, upstreamMessage stri
 func logUpstreamError(ctx context.Context, short string, err error, extra ...any) {
 	attrs := []any{"trace_id", short, "err", err}
 	attrs = append(attrs, extra...)
-	var ue *kiroclient.UpstreamError
-	if errors.As(err, &ue) {
+	if ue, ok := errors.AsType[*kiroclient.UpstreamError](err); ok {
 		attrs = append(attrs,
 			"status", ue.Status,
 			"content_type", ue.ContentType,
