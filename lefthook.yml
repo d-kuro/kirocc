@@ -3,18 +3,12 @@ pre-commit:
   commands:
     golangci-lint:
       glob: "*.go"
-      env:
-        GOEXPERIMENT: jsonv2
       run: golangci-lint run --fix ./...
     golangci-lint-fmt:
       glob: "*.go"
-      env:
-        GOEXPERIMENT: jsonv2
       run: golangci-lint fmt ./...
     go-fix:
       glob: "*.go"
-      env:
-        GOEXPERIMENT: jsonv2
       run: go fix ./...
     oxfmt:
       glob: "*.md"

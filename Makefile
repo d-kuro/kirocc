@@ -1,4 +1,3 @@
-export GOEXPERIMENT := jsonv2
 
 BIN := dist/kirocc
 

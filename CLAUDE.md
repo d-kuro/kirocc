@@ -10,7 +10,7 @@
 ## Project Overview
 
 **Project type:** CLI tool — local proxy server (Anthropic Messages API → Kiro backend)
-**Primary language:** Go (requires `GOEXPERIMENT=jsonv2`)
+**Primary language:** Go
 
 ---
 

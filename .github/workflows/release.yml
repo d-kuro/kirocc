@@ -8,9 +8,6 @@ on:
 permissions:
   contents: write
 
-env:
-  GOEXPERIMENT: jsonv2
-
 jobs:
   ci:
     runs-on: ubuntu-latest

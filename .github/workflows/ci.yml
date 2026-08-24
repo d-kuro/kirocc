@@ -9,9 +9,6 @@ on:
     types: [ opened, synchronize ]
     paths-ignore: [ '**.md' ]
 
-env:
-  GOEXPERIMENT: jsonv2
-
 jobs:
   ci:
     runs-on: ubuntu-latest

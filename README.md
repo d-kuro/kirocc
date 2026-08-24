@@ -26,7 +26,7 @@ Just set `ANTHROPIC_BASE_URL` from any Anthropic API client (e.g., Claude Code) 
 
 ## Prerequisites
 
-- Go 1.26+
+- Go 1.27+
 - One of the following:
   - [Kiro CLI](https://kiro.dev) installed and logged in, **or**
   - A Kiro API key (`KIRO_API_KEY`) — available for [Kiro Pro, Pro+, Pro Max, and Power](https://kiro.dev/docs/cli/authentication/) subscribers
@@ -127,7 +127,7 @@ API keys are available for Kiro Pro, Pro+, Pro Max, and Power subscribers. On gr
 | ------- | ----------------------------------------------------- |
 | macOS   | `~/Library/Application Support/kiro-cli/data.sqlite3` |
 | Linux   | `~/.local/share/kiro-cli/data.sqlite3`                |
-| Windows | `%LOCALAPPDATA%\kiro-cli\data.sqlite3`               |
+| Windows | `%LOCALAPPDATA%\kiro-cli\data.sqlite3`                |
 
 ### Environment variables
 
