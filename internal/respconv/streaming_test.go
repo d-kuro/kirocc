@@ -16,7 +16,7 @@ func TestSSEWriter_TextOnly(t *testing.T) {
 	sw := NewSSEWriter(context.Background(), w, "claude-sonnet-4.6", 200000, nil, 0, 0)
 
 	sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "Hello"})
-	sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "Hello world"})
+	sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: " world"})
 	_ = sw.Finish()
 
 	body := w.Body.String()
@@ -35,6 +35,11 @@ func TestSSEWriter_TextOnly(t *testing.T) {
 	if !strings.Contains(body, `"text":" world"`) {
 		t.Fatal("missing second delta")
 	}
+	// Exactly one delta per frame — a duplicated or re-sent frame would
+	// produce extra text_delta events (issue #112 regression guard).
+	if n := strings.Count(body, `"text_delta"`); n != 2 {
+		t.Fatalf("text_delta count = %d, want 2", n)
+	}
 	if !strings.Contains(body, "event: message_stop\n") {
 		t.Fatal("missing event: message_stop")
 	}
@@ -48,7 +53,7 @@ func TestSSEWriter_ThinkingWithSignature(t *testing.T) {
 	sw := NewSSEWriter(context.Background(), w, "claude-sonnet-4.6", 200000, nil, 0, 0)
 
 	sw.HandleEvent(kiroproto.Event{Type: "reasoningContentEvent", ThinkingText: "Let me", Signature: "sig_abc123"})
-	sw.HandleEvent(kiroproto.Event{Type: "reasoningContentEvent", ThinkingText: "Let me think"})
+	sw.HandleEvent(kiroproto.Event{Type: "reasoningContentEvent", ThinkingText: " think"})
 	sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "Answer"})
 	_ = sw.Finish()
 

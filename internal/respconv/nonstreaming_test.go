@@ -64,7 +64,7 @@ func TestNonStreamingAccumulator_RedactedOnlyIsEmptyVisible(t *testing.T) {
 func TestBuildNonStreamingResponse_TextOnly(t *testing.T) {
 	events := []kiroproto.Event{
 		{Type: "assistantResponseEvent", Content: "Hello"},
-		{Type: "assistantResponseEvent", Content: "Hello world"},
+		{Type: "assistantResponseEvent", Content: " world"},
 		{Type: "metadataEvent", InputTokens: 10, OutputTokens: 5},
 	}
 	resp, _ := BuildNonStreamingResponse(events, "claude-sonnet-4.6", 200000, nil, 0, 0)
@@ -248,7 +248,7 @@ func TestBuildNonStreamingResponse_ThinkingWithToolUse_NoTextInjection(t *testin
 func TestNewNonStreamingAccumulator_ProcessAndBuild(t *testing.T) {
 	acc := NewNonStreamingAccumulator(200000, nil, 0, 0)
 	acc.ProcessEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "Hello"})
-	acc.ProcessEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "Hello world"})
+	acc.ProcessEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: " world"})
 	acc.ProcessEvent(kiroproto.Event{Type: "metadataEvent", InputTokens: 10, OutputTokens: 5})
 
 	resp, stats := acc.BuildResponse("claude-sonnet-4.6")

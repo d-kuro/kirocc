@@ -290,7 +290,7 @@ flowchart TB
 6. Kiro API returns an AWS Event Stream (binary frames)
 7. Response conversion pipeline:
    - Parses binary event stream frames
-   - Converts cumulative text to incremental deltas
+   - Forwards incremental text frames from the backend as SSE deltas
    - Intercepts `ToolSearch` tool_use calls, executes search, emits `server_tool_use`/`tool_search_tool_result` SSE events, and re-requests Kiro with discovered tools (up to 3 rounds)
    - Parses `<thinking>` tags from `assistantResponseEvent` or uses `reasoningContentEvent` (with deduplication)
    - Enforces `stop_sequences` and `max_tokens` adapter-side

@@ -184,3 +184,31 @@ func historyText(p *kiroproto.Payload) string {
 	}
 	return strings.Join(parts, "\n")
 }
+
+// concatTextDeltas extracts every content_block_delta text_delta from an SSE
+// body in order and returns the concatenated text. Exact comparison against
+// the expected full text catches both lost and duplicated frames (issue #112).
+func concatTextDeltas(t *testing.T, sseBody string) string {
+	t.Helper()
+	var out strings.Builder
+	for line := range strings.Lines(sseBody) {
+		data, ok := strings.CutPrefix(strings.TrimSpace(line), "data: ")
+		if !ok {
+			continue
+		}
+		var ev struct {
+			Type  string `json:"type"`
+			Delta struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"delta"`
+		}
+		if err := json.Unmarshal([]byte(data), &ev); err != nil {
+			continue
+		}
+		if ev.Type == "content_block_delta" && ev.Delta.Type == "text_delta" {
+			out.WriteString(ev.Delta.Text)
+		}
+	}
+	return out.String()
+}

@@ -14,7 +14,7 @@ func TestAccumulator_TextDelta(t *testing.T) {
 	if delta.TextDelta != "Hello" {
 		t.Fatalf("TextDelta = %q", delta.TextDelta)
 	}
-	delta = acc.ProcessEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "Hello world"})
+	delta = acc.ProcessEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: " world"})
 	if delta.TextDelta != " world" {
 		t.Fatalf("TextDelta = %q", delta.TextDelta)
 	}
@@ -32,9 +32,42 @@ func TestAccumulator_ThinkingDelta(t *testing.T) {
 	if acc.Signature != "sig_1" {
 		t.Fatalf("Signature = %q", acc.Signature)
 	}
-	delta = acc.ProcessEvent(kiroproto.Event{Type: "reasoningContentEvent", ThinkingText: "Let me think"})
+	delta = acc.ProcessEvent(kiroproto.Event{Type: "reasoningContentEvent", ThinkingText: " think"})
 	if delta.ThinkingDelta != " think" {
 		t.Fatalf("ThinkingDelta = %q", delta.ThinkingDelta)
+	}
+}
+
+// Regression for issue #112: frames must pass through verbatim even when a
+// frame coincidentally forms a prefix relation with the accumulated text —
+// the shape that made both ComputeDelta and the deltaTracker drop bytes.
+func TestAccumulator_PrefixCollisionFramesPassThrough(t *testing.T) {
+	tests := []struct {
+		name   string
+		frames []string
+		want   string
+	}{
+		{"frame equals prior prefix", []string{"abc", "a"}, "abca"},
+		{"frame extends total coincidentally", []string{"ab", "abx"}, "ababx"},
+		{"repeated identical frame", []string{"| ok |", "| ok |"}, "| ok || ok |"},
+		{"doubled letter at seam", []string{"the pas", "sword"}, "the password"},
+		{"closing code fence", []string{"```python\nprint(1)\n", "```"}, "```python\nprint(1)\n```"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var textAcc, thinkAcc responseAccumulator
+			var textOut, thinkOut string
+			for _, f := range tt.frames {
+				textOut += textAcc.ProcessEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: f}).TextDelta
+				thinkOut += thinkAcc.ProcessEvent(kiroproto.Event{Type: "reasoningContentEvent", ThinkingText: f}).ThinkingDelta
+			}
+			if textOut != tt.want || textAcc.TextBuf.String() != tt.want {
+				t.Errorf("text: deltas = %q, TextBuf = %q, want %q", textOut, textAcc.TextBuf.String(), tt.want)
+			}
+			if thinkOut != tt.want || thinkAcc.ThinkingBuf.String() != tt.want {
+				t.Errorf("thinking: deltas = %q, ThinkingBuf = %q, want %q", thinkOut, thinkAcc.ThinkingBuf.String(), tt.want)
+			}
+		})
 	}
 }
 
@@ -218,7 +251,7 @@ func TestAccumulator_StopSequence(t *testing.T) {
 	tests := []struct {
 		name        string
 		stopSeqs    []string
-		chunks      []string // cumulative content chunks from Kiro
+		chunks      []string // incremental content chunks from Kiro
 		wantDeltas  []string // expected text deltas emitted
 		wantStop    bool
 		wantStopSeq string
@@ -236,7 +269,7 @@ func TestAccumulator_StopSequence(t *testing.T) {
 		{
 			name:        "cross-chunk boundary",
 			stopSeqs:    []string{"\n\nHuman:"},
-			chunks:      []string{"Hello\n", "Hello\n\nHuman: hi"},
+			chunks:      []string{"Hello\n", "\nHuman: hi"},
 			wantDeltas:  []string{"Hello"},
 			wantStop:    true,
 			wantStopSeq: "\n\nHuman:",
@@ -245,7 +278,7 @@ func TestAccumulator_StopSequence(t *testing.T) {
 		{
 			name:        "no match",
 			stopSeqs:    []string{"\n\nHuman:"},
-			chunks:      []string{"Hello", "Hello world"},
+			chunks:      []string{"Hello", " world"},
 			wantDeltas:  []string{"Hell", "o world"},
 			wantStop:    false,
 			wantStopSeq: "",
@@ -263,7 +296,7 @@ func TestAccumulator_StopSequence(t *testing.T) {
 		{
 			name:        "empty stop sequences",
 			stopSeqs:    nil,
-			chunks:      []string{"Hello", "Hello world"},
+			chunks:      []string{"Hello", " world"},
 			wantDeltas:  []string{"Hello", " world"},
 			wantStop:    false,
 			wantStopSeq: "",
@@ -322,7 +355,7 @@ func TestAccumulator_MaxTokens(t *testing.T) {
 	tests := []struct {
 		name       string
 		budget     int
-		chunks     []string // cumulative content chunks
+		chunks     []string // incremental content chunks
 		wantDeltas []string
 		wantStop   bool
 		wantReason string
@@ -331,8 +364,8 @@ func TestAccumulator_MaxTokens(t *testing.T) {
 			name:   "budget reached mid-stream",
 			budget: 2, // 2 tokens = 8 runes
 			// chunk1: "Hello" (5 runes, 5/4=1 token, ok)
-			// chunk2: "Hello world!" (delta=" world!", 7 runes, total=12, 12/4=3 >= 2, stop)
-			chunks:     []string{"Hello", "Hello world!"},
+			// chunk2: " world!" (7 runes, total=12, 12/4=3 >= 2, stop)
+			chunks:     []string{"Hello", " world!"},
 			wantDeltas: []string{"Hello", " wo"},
 			wantStop:   true,
 			wantReason: "max_tokens",
@@ -340,14 +373,14 @@ func TestAccumulator_MaxTokens(t *testing.T) {
 		{
 			name:       "budget not reached",
 			budget:     100,
-			chunks:     []string{"Hello", "Hello world"},
+			chunks:     []string{"Hello", " world"},
 			wantDeltas: []string{"Hello", " world"},
 			wantStop:   false,
 		},
 		{
 			name:       "budget zero means no enforcement",
 			budget:     0,
-			chunks:     []string{"Hello", "Hello world"},
+			chunks:     []string{"Hello", " world"},
 			wantDeltas: []string{"Hello", " world"},
 			wantStop:   false,
 		},
@@ -452,7 +485,7 @@ func TestAccumulator_ThinkingViaTags_SplitAcrossChunks(t *testing.T) {
 	// Chunk 2: more thinking + close tag + text
 	d2 := acc.ProcessEvent(kiroproto.Event{
 		Type:    "assistantResponseEvent",
-		Content: "<thinking>Step 1: analyze</thinking>Result",
+		Content: ": analyze</thinking>Result",
 	})
 	// Combine deltas.
 	allThinking := d1.ThinkingDelta + d2.ThinkingDelta

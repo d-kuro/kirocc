@@ -9,7 +9,7 @@ import (
 
 func TestE2E_SimpleText_Streaming(t *testing.T) {
 	p1 := mustJSON(map[string]string{"content": "Hello"})
-	p2 := mustJSON(map[string]string{"content": "Hello world"})
+	p2 := mustJSON(map[string]string{"content": " world"})
 	client := &capturingClient{events: []any{"assistantResponseEvent", p1, "assistantResponseEvent", p2}}
 
 	srv := newE2EServer(t, client)
@@ -35,8 +35,8 @@ func TestE2E_SimpleText_Streaming(t *testing.T) {
 			t.Errorf("missing %q in SSE body", want)
 		}
 	}
-	if !strings.Contains(sseBody, `"text_delta"`) {
-		t.Error("missing text_delta in SSE body")
+	if got := concatTextDeltas(t, sseBody); got != "Hello world" {
+		t.Errorf("concatenated text deltas = %q, want %q", got, "Hello world")
 	}
 }
 

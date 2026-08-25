@@ -13,10 +13,8 @@ func (a *responseAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 
 	switch e.Type {
 	case kiroproto.EventAssistantResponse:
-		delta := ComputeDelta(e.Content, a.lastContent)
-		a.lastContent = e.Content
-		if delta != "" && !a.LocalStop {
-			textOut, thinkingOut := a.parseThinkingTags(delta)
+		if e.Content != "" && !a.LocalStop {
+			textOut, thinkingOut := a.parseThinkingTags(e.Content)
 			if thinkingOut != "" {
 				a.accumulateThinking(thinkingOut, &d)
 			}
@@ -55,10 +53,8 @@ func (a *responseAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 		if a.suppressReasoningContent {
 			return d
 		}
-		delta := ComputeDelta(e.ThinkingText, a.lastThinking)
-		a.lastThinking = e.ThinkingText
-		if delta != "" && !a.LocalStop {
-			a.accumulateThinking(delta, &d)
+		if e.ThinkingText != "" && !a.LocalStop {
+			a.accumulateThinking(e.ThinkingText, &d)
 		}
 
 	case kiroproto.EventToolUse:

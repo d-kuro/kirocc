@@ -391,7 +391,7 @@ func TestPostMessages_NonStreaming(t *testing.T) {
 
 func TestPostMessages_Streaming(t *testing.T) {
 	p1, _ := json.Marshal(map[string]string{"content": "Hello"})
-	p2, _ := json.Marshal(map[string]string{"content": "Hello world"})
+	p2, _ := json.Marshal(map[string]string{"content": " world"})
 
 	client := &mockKiroClient{handler: func(ctx context.Context, token string, payload *kiroproto.Payload, region string) (*kiroclient.Response, error) {
 		body := buildEventStream("assistantResponseEvent", p1, "assistantResponseEvent", p2)
@@ -420,6 +420,9 @@ func TestPostMessages_Streaming(t *testing.T) {
 		if !strings.Contains(sseBody, want) {
 			t.Errorf("missing %q in SSE body", want)
 		}
+	}
+	if got := concatTextDeltas(t, sseBody); got != "Hello world" {
+		t.Errorf("concatenated text deltas = %q, want %q", got, "Hello world")
 	}
 }
 

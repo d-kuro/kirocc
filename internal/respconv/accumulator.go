@@ -31,9 +31,6 @@ type EventDelta struct {
 
 // responseAccumulator tracks shared state across streaming and non-streaming response processing.
 type responseAccumulator struct {
-	// Cumulative text trackers for ComputeDelta.
-	lastContent  string
-	lastThinking string
 	// Accumulated full text (for non-streaming).
 	TextBuf     strings.Builder
 	ThinkingBuf strings.Builder
