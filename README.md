@@ -39,9 +39,9 @@ Just set `ANTHROPIC_BASE_URL` from any Anthropic API client (e.g., Claude Code) 
 brew install d-kuro/tap/kirocc --trust
 ```
 
-`d-kuro/tap` ships both a **cask** and a **formula**. The formula (`brew services`
-capable) is what you want if you intend to run kirocc as a background service; the
-cask is useful for one-off manual runs.
+`d-kuro/tap` ships both a **cask** and a **formula**. `brew install` resolves to the
+formula, which installs the binary to `$(brew --prefix)/bin` so `kirocc` works as a
+plain command. The formula also supports `brew services` for background use.
 
 #### Run as a service (recommended)
 
