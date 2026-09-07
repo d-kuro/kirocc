@@ -15,6 +15,10 @@ import (
 const (
 	// DefaultOTelBodyLimit is the default max bytes of request body to capture in OTel spans.
 	DefaultOTelBodyLimit = 32 * 1024
+	// DefaultMaxRequestBody is the default cap on a client request body. The
+	// Anthropic Messages API accepts 32 MB, so match it rather than rejecting
+	// requests the upstream would have served.
+	DefaultMaxRequestBody = 32 << 20
 	// DefaultKeepAliveInterval is the default idle time between SSE keep-alive comments.
 	DefaultKeepAliveInterval = 15 * time.Second
 )
@@ -44,7 +48,12 @@ type Config struct {
 	OTel              bool
 	OTelBodyLimit     int
 	KeepAliveInterval time.Duration
-	LogFile           logging.LogFileConfig
+	// MaxRequestBody caps the client request body in bytes. A conversation is
+	// re-sent in full on every turn, so images and long histories push this up
+	// over a session; too low a cap wedges a client permanently, since every
+	// retry sends the same oversized body. 0 means unlimited.
+	MaxRequestBody int64
+	LogFile        logging.LogFileConfig
 }
 
 // regionPattern matches the region forms Kiro uses ("us-east-1",
@@ -109,6 +118,9 @@ func ApplyEnvOverrides(cfg *Config) error {
 	if err := applyInt("KIROCC_OTEL_BODY_LIMIT", &cfg.OTelBodyLimit); err != nil {
 		return err
 	}
+	if err := applyInt64("KIROCC_MAX_REQUEST_BODY", &cfg.MaxRequestBody); err != nil {
+		return err
+	}
 	if err := applyDuration("KIROCC_KEEPALIVE_INTERVAL", &cfg.KeepAliveInterval); err != nil {
 		return err
 	}
@@ -144,6 +156,9 @@ func (c *Config) Validate() error {
 	if c.OTelBodyLimit < 0 {
 		return fmt.Errorf("otel-body-limit must be >= 0, got %d", c.OTelBodyLimit)
 	}
+	if c.MaxRequestBody < 0 {
+		return fmt.Errorf("max-request-body must be >= 0, got %d", c.MaxRequestBody)
+	}
 	if c.KeepAliveInterval != 0 && c.KeepAliveInterval < time.Second {
 		return fmt.Errorf("keepalive-interval must be 0 or >= 1s, got %s", c.KeepAliveInterval)
 	}
@@ -164,6 +179,17 @@ func applyString(key string, dst *string) {
 func applyInt(key string, dst *int) error {
 	if v := os.Getenv(key); v != "" {
 		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("invalid %s=%q: %w", key, v, err)
+		}
+		*dst = n
+	}
+	return nil
+}
+
+func applyInt64(key string, dst *int64) error {
+	if v := os.Getenv(key); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
 			return fmt.Errorf("invalid %s=%q: %w", key, v, err)
 		}

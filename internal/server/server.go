@@ -5,6 +5,7 @@ import (
 	"time"
 
 	messagesapp "github.com/d-kuro/kirocc/internal/app/messages"
+	"github.com/d-kuro/kirocc/internal/config"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
 	"github.com/d-kuro/kirocc/internal/tracing"
 )
@@ -31,6 +32,11 @@ func WithKeepAliveInterval(interval time.Duration) ServerOption {
 	return func(s *Server) { s.keepAliveInterval = interval }
 }
 
+// WithMaxRequestBody caps the client request body in bytes. Zero disables the cap.
+func WithMaxRequestBody(limit int64) ServerOption {
+	return func(s *Server) { s.maxRequestBody = limit }
+}
+
 // Server is the HTTP server for the kirocc proxy.
 type Server struct {
 	apiKey            string
@@ -38,6 +44,7 @@ type Server struct {
 	otelBodyLimit     int
 	captureEnabled    bool
 	keepAliveInterval time.Duration
+	maxRequestBody    int64
 	mux               *http.ServeMux
 	messages          *messagesapp.Service
 }
@@ -45,8 +52,9 @@ type Server struct {
 // New creates a new Server.
 func New(authMgr messagesapp.TokenGetter, apiKey string, client kiroclient.Client, opts ...ServerOption) *Server {
 	s := &Server{
-		apiKey: apiKey,
-		mux:    http.NewServeMux(),
+		apiKey:         apiKey,
+		mux:            http.NewServeMux(),
+		maxRequestBody: config.DefaultMaxRequestBody,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -54,6 +62,7 @@ func New(authMgr messagesapp.TokenGetter, apiKey string, client kiroclient.Clien
 	s.messages = messagesapp.New(authMgr, client,
 		messagesapp.WithCapture(s.captureEnabled),
 		messagesapp.WithKeepAliveInterval(s.keepAliveInterval),
+		messagesapp.WithMaxRequestBody(s.maxRequestBody),
 	)
 	s.registerRoutes()
 	return s

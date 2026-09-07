@@ -2,6 +2,8 @@ package messages
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -21,8 +23,18 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	traceID, short := logging.TraceIDs(ctx)
 
-	req, err := parseAndValidateRequest(ctx, w, r)
+	req, err := parseAndValidateRequest(ctx, w, r, s.maxRequestBody)
 	if err != nil {
+		// A body over the cap is actionable in a way a malformed body is not
+		// (drop images, /compact, or raise -max-request-body), and the decoder
+		// error alone does not say which it was. Report the size and the cap.
+		if errors.As(err, new(*http.MaxBytesError)) {
+			slog.WarnContext(ctx, "request body too large",
+				"trace_id", short, "limit_bytes", s.maxRequestBody, "content_length", r.ContentLength)
+			httpx.WriteError(w, http.StatusRequestEntityTooLarge, errTypeInvalidRequest,
+				fmt.Sprintf("request body exceeds the %d byte limit; raise -max-request-body (or KIROCC_MAX_REQUEST_BODY) to allow larger requests", s.maxRequestBody))
+			return
+		}
 		slog.WarnContext(ctx, "invalid request", "trace_id", short, "err", err)
 		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 		return

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/d-kuro/kirocc/internal/auth"
+	"github.com/d-kuro/kirocc/internal/config"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
 )
 
@@ -19,6 +20,7 @@ type Service struct {
 	client            kiroclient.Client
 	captureEnabled    bool
 	keepAliveInterval time.Duration
+	maxRequestBody    int64
 }
 
 // Option configures a Service.
@@ -37,11 +39,18 @@ func WithKeepAliveInterval(interval time.Duration) Option {
 	return func(s *Service) { s.keepAliveInterval = interval }
 }
 
+// WithMaxRequestBody caps the client request body in bytes. Zero disables the
+// cap. Defaults to config.DefaultMaxRequestBody when the option is omitted.
+func WithMaxRequestBody(limit int64) Option {
+	return func(s *Service) { s.maxRequestBody = limit }
+}
+
 // New constructs a message service.
 func New(authMgr TokenGetter, client kiroclient.Client, opts ...Option) *Service {
 	s := &Service{
-		auth:   authMgr,
-		client: client,
+		auth:           authMgr,
+		client:         client,
+		maxRequestBody: config.DefaultMaxRequestBody,
 	}
 	for _, opt := range opts {
 		opt(s)

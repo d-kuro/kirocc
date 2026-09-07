@@ -19,7 +19,7 @@ import (
 
 // HandleCountTokens serves POST /v1/messages/count_tokens.
 func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
-	req, err := parseAndValidateRequest(r.Context(), w, r)
+	req, err := parseAndValidateRequest(r.Context(), w, r, s.maxRequestBody)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
 		return
@@ -79,9 +79,12 @@ func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("\n"))
 }
 
-// parseAndValidateRequest decodes and validates an Anthropic request from the HTTP body.
-func parseAndValidateRequest(ctx context.Context, w http.ResponseWriter, r *http.Request) (*anthropic.Request, error) {
-	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
+// parseAndValidateRequest decodes and validates an Anthropic request from the
+// HTTP body. maxBody caps the body in bytes; 0 disables the cap.
+func parseAndValidateRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, maxBody int64) (*anthropic.Request, error) {
+	if maxBody > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+	}
 	var req anthropic.Request
 	if slog.Default().Enabled(ctx, slog.LevelDebug) {
 		raw, err := io.ReadAll(r.Body)

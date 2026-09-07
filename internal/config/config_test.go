@@ -253,6 +253,35 @@ func TestApplyEnvOverrides_ModelDiscovery(t *testing.T) {
 	}
 }
 
+func TestApplyEnvOverrides_MaxRequestBody(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		initial int64
+		want    int64
+		wantErr bool
+	}{
+		{name: "raise", value: "67108864", initial: DefaultMaxRequestBody, want: 64 << 20},
+		{name: "unlimited", value: "0", initial: DefaultMaxRequestBody, want: 0},
+		{name: "unset keeps flag default", value: "", initial: DefaultMaxRequestBody, want: DefaultMaxRequestBody},
+		{name: "beyond int32", value: "5368709120", initial: DefaultMaxRequestBody, want: 5 << 30},
+		{name: "invalid", value: "32MB", initial: DefaultMaxRequestBody, want: DefaultMaxRequestBody, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KIROCC_MAX_REQUEST_BODY", tt.value)
+			cfg := Config{Host: "127.0.0.1", Port: 3456, MaxRequestBody: tt.initial}
+			err := ApplyEnvOverrides(&cfg)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ApplyEnvOverrides() err = %v, wantErr = %v", err, tt.wantErr)
+			}
+			if cfg.MaxRequestBody != tt.want {
+				t.Errorf("MaxRequestBody = %d, want %d", cfg.MaxRequestBody, tt.want)
+			}
+		})
+	}
+}
+
 func TestConfig_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -265,6 +294,9 @@ func TestConfig_Validate(t *testing.T) {
 		{"port negative", Config{Host: "127.0.0.1", Port: -1}, true},
 		{"port too large", Config{Host: "127.0.0.1", Port: 70000}, true},
 		{"negative otel body limit", Config{Host: "127.0.0.1", Port: 3456, OTelBodyLimit: -1}, true},
+		{"negative max request body", Config{Host: "127.0.0.1", Port: 3456, MaxRequestBody: -1}, true},
+		{"max request body unlimited", Config{Host: "127.0.0.1", Port: 3456, MaxRequestBody: 0}, false},
+		{"max request body set", Config{Host: "127.0.0.1", Port: 3456, MaxRequestBody: DefaultMaxRequestBody}, false},
 		{"keep-alive disabled", Config{Host: "127.0.0.1", Port: 3456, KeepAliveInterval: 0}, false},
 		{"keep-alive minimum", Config{Host: "127.0.0.1", Port: 3456, KeepAliveInterval: time.Second}, false},
 		{"keep-alive negative", Config{Host: "127.0.0.1", Port: 3456, KeepAliveInterval: -time.Second}, true},
