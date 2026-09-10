@@ -8,8 +8,37 @@ import (
 	"strings"
 	"testing"
 
+	"encoding/json/v2"
+
 	"github.com/d-kuro/kirocc/internal/kiroproto"
 )
+
+// concatTextDeltas extracts every content_block_delta text_delta from an SSE
+// body in order and returns the concatenated text.
+func concatTextDeltas(t *testing.T, sseBody string) string {
+	t.Helper()
+	var out strings.Builder
+	for _, line := range strings.Split(sseBody, "\n") {
+		data, ok := strings.CutPrefix(strings.TrimSpace(line), "data: ")
+		if !ok {
+			continue
+		}
+		var ev struct {
+			Type  string `json:"type"`
+			Delta struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"delta"`
+		}
+		if err := json.Unmarshal([]byte(data), &ev); err != nil {
+			continue
+		}
+		if ev.Type == "content_block_delta" && ev.Delta.Type == "text_delta" {
+			out.WriteString(ev.Delta.Text)
+		}
+	}
+	return out.String()
+}
 
 func TestSSEWriter_TextOnly(t *testing.T) {
 	w := httptest.NewRecorder()
@@ -500,5 +529,59 @@ func TestSSEWriter_MaxTokensRedactedOnly_StopsImmediately(t *testing.T) {
 	}
 	if !strings.Contains(body, "message_stop") {
 		t.Fatalf("missing message_stop: %s", body)
+	}
+}
+
+// TestSSEWriter_ResetAccumulator_FlushesHoldback is a regression test for a
+// byte-loss bug at ToolSearch round boundaries: a partial <thinking> tag or
+// stop-sequence prefix held back by the accumulator for cross-chunk boundary
+// matching was silently discarded when ResetAccumulator swapped in a fresh
+// accumulator for the next round, instead of being flushed first.
+func TestSSEWriter_ResetAccumulator_FlushesHoldback(t *testing.T) {
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "claude-sonnet-4.6", 200000, nil, 0, 0)
+
+	// "<" is a valid prefix of "<thinking>", so parseThinkingTags buffers it
+	// instead of emitting it, waiting to see whether a full tag follows.
+	sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "5 < 6 and 7 <"})
+
+	// Simulate the ToolSearch orchestrator starting a new round: the held-back
+	// "<" must be flushed now, since a fresh accumulator has no memory of it.
+	sw.ResetAccumulator(200000, nil, 0, 0)
+
+	sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "done"})
+	_ = sw.Finish()
+
+	got := concatTextDeltas(t, w.Body.String())
+	want := "5 < 6 and 7 <done"
+	if got != want {
+		t.Fatalf("concatenated text deltas = %q, want %q (round-boundary byte loss)", got, want)
+	}
+}
+
+// TestSSEWriter_WriteDelta_InvalidUTF8 is a regression test for a swallowed
+// json.Marshal error: encoding/json/v2 rejects invalid UTF-8 outright, and
+// discarding that error left `escaped` empty, emitting a malformed SSE line
+// (`"text":`) that breaks the client's JSON parse for the whole event.
+func TestSSEWriter_WriteDelta_InvalidUTF8(t *testing.T) {
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "claude-sonnet-4.6", 200000, nil, 0, 0)
+
+	sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "abc\xffdef"})
+	_ = sw.Finish()
+
+	body := w.Body.String()
+	if strings.Contains(body, `"text":}`) || strings.Contains(body, `"text":,`) {
+		t.Fatalf("emitted malformed SSE delta for invalid UTF-8: %s", body)
+	}
+	for _, line := range strings.Split(body, "\n") {
+		data, ok := strings.CutPrefix(strings.TrimSpace(line), "data: ")
+		if !ok || data == "" {
+			continue
+		}
+		var v any
+		if err := json.Unmarshal([]byte(data), &v); err != nil {
+			t.Fatalf("SSE data line is not valid JSON: %q: %v", data, err)
+		}
 	}
 }

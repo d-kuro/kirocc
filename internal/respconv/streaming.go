@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
@@ -419,7 +420,21 @@ func (s *SSEWriter) SetToolNameMap(m map[string]string) {
 
 // ResetAccumulator replaces the internal accumulator with a fresh one,
 // preserving the SSEWriter's block index and started state for continuation.
+// Flushes any text/thinking bytes the outgoing accumulator was still holding
+// back for cross-chunk boundary matching (a partial <thinking> tag or stop
+// sequence prefix) — otherwise those bytes are silently dropped at the round
+// boundary instead of carrying over to the next round's stream.
 func (s *SSEWriter) ResetAccumulator(contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int) {
+	textDelta, thinkingDelta := s.acc.FinalizeStream()
+	if thinkingDelta != "" {
+		s.writeThinkingDelta(EventDelta{ThinkingDelta: thinkingDelta})
+	}
+	if textDelta != "" {
+		s.fireVisibleOutput()
+		s.switchBlock(anthropic.BlockTypeText)
+		s.writeDelta("text_delta", "text", textDelta)
+	}
+
 	filterNames := s.acc.dropToolNames
 	nameMap := s.acc.toolNameMap
 	s.acc = newAccumulator(contextWindowSize, stopSequences, maxTokens, preCountedInputTokens)
@@ -475,7 +490,20 @@ func (s *SSEWriter) captureWriterError() {
 
 // writeDelta writes a content_block_delta SSE event with a single string field.
 func (s *SSEWriter) writeDelta(deltaType, fieldName, value string) {
-	escaped, _ := json.Marshal(value)
+	escaped, err := json.Marshal(value)
+	if err != nil {
+		// json/v2 rejects invalid UTF-8 outright instead of escaping it, which
+		// would otherwise leave `escaped` empty and emit a malformed SSE line
+		// (`"text":`) that breaks the client's JSON parse for the whole event.
+		// Replace the invalid bytes rather than emit or silently drop them.
+		slog.WarnContext(s.ctx, "SSE delta value has invalid UTF-8, replacing", "event", deltaType, "err", err)
+		value = strings.ToValidUTF8(value, "�")
+		escaped, err = json.Marshal(value)
+		if err != nil {
+			slog.ErrorContext(s.ctx, "SSE delta JSON marshal failed after sanitizing", "event", deltaType, "err", err)
+			return
+		}
+	}
 	s.writeRawSSE("content_block_delta",
 		`{"type":"content_block_delta","index":%d,"delta":{"type":"%s","%s":%s}}`,
 		s.blockIndex, deltaType, fieldName, escaped)
