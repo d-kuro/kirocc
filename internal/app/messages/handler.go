@@ -13,6 +13,7 @@ import (
 	"github.com/d-kuro/kirocc/internal/models"
 	"github.com/d-kuro/kirocc/internal/reqconv"
 	"github.com/d-kuro/kirocc/internal/toolsearch"
+	"github.com/d-kuro/kirocc/internal/websearch"
 )
 
 const headerCCSessionID = "X-Claude-Code-Session-Id"
@@ -58,9 +59,28 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 
 	effort := resolveEffort(ctx, kiroModel, req, thinking)
 
-	// Server-side tools (tool search, advisor) short-circuit to the
+	// Server-side tools (tool search, advisor, web search) short-circuit to the
 	// orchestrator, which has its own retry loop.
-	tsCtx, advCtx := newServerToolContexts(req)
+	tsCtx, advCtx, wsCtx := s.newServerToolContexts(req)
+	// A web_search definition with no provider configured cannot be honoured:
+	// Kiro has no web search, and forwarding the definition as a callable tool
+	// returns a tool_use block the client discards — the search silently
+	// reports no results. Refusing says so instead.
+	if wsCtx == nil && anthropic.FindWebSearchTool(req.Tools) != nil {
+		slog.WarnContext(ctx, "web search requested but no provider is configured", "trace_id", short)
+		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest,
+			"web_search_20250305 is not supported: Kiro has no web search capability. "+
+				"Start kirocc with -web-search-provider to run searches in-proxy, "+
+				"or take the tool out of the request (claude --disallowedTools WebSearch).")
+		return
+	}
+	if wsCtx != nil {
+		slog.InfoContext(ctx, "web search enabled",
+			"trace_id", short,
+			"provider", wsCtx.ProviderName(),
+			"max_uses", wsCtx.MaxUses,
+		)
+	}
 	if tsCtx != nil {
 		slog.InfoContext(ctx, "tool search enabled",
 			"trace_id", short,
@@ -69,8 +89,8 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 			"active_tools", len(tsCtx.ActiveTools),
 		)
 	}
-	if tsCtx != nil || advCtx != nil {
-		s.runServerTools(ctx, w, req, creds, tsCtx, advCtx, kiroModel, anthropicModel, contextWindowSize, effort, ccSessionID, short)
+	if tsCtx != nil || advCtx != nil || wsCtx != nil {
+		s.runServerTools(ctx, w, req, creds, tsCtx, advCtx, wsCtx, kiroModel, anthropicModel, contextWindowSize, effort, ccSessionID, short)
 		return
 	}
 
@@ -122,18 +142,20 @@ func (s *Service) logRequest(ctx context.Context, short, ccSessionID, kiroModel 
 // Both the live send path and count_tokens call this so the payload they build
 // carries an identical tool set — a token count derived from a different tool
 // list would under-report by the size of the tool schemas.
-func newServerToolContexts(req *anthropic.Request) (*toolsearch.Context, *advisor.Context) {
+func (s *Service) newServerToolContexts(req *anthropic.Request) (*toolsearch.Context, *advisor.Context, *websearch.Context) {
 	tsCtx := toolsearch.NewContext(req.Tools)
 	if tsCtx != nil {
 		tsCtx.PromoteTools(reqconv.ExtractToolReferences(req.Messages))
 	}
 	// models.ResolveKnown is strict by design: an unknown advisor model must
 	// yield model_not_found, never a silent downgrade to a default model.
-	return tsCtx, advisor.NewContext(req.Tools, models.ResolveKnown)
+	return tsCtx,
+		advisor.NewContext(req.Tools, models.ResolveKnown),
+		websearch.NewContext(req.Tools, s.webSearch, s.webSearchMaxResults)
 }
 
 // runServerTools wires up the orchestrator and retries once on empty-visible end_turn.
-func (s *Service) runServerTools(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, creds *auth.Credentials, tsCtx *toolsearch.Context, advCtx *advisor.Context, kiroModel, responseModel string, contextWindowSize int, effort string, ccSessionID, short string) {
+func (s *Service) runServerTools(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, creds *auth.Credentials, tsCtx *toolsearch.Context, advCtx *advisor.Context, wsCtx *websearch.Context, kiroModel, responseModel string, contextWindowSize int, effort string, ccSessionID, short string) {
 	var dropNames []string
 	if tsCtx != nil {
 		dropNames = append(dropNames, toolsearch.KiroToolSearchName)
@@ -141,10 +163,14 @@ func (s *Service) runServerTools(ctx context.Context, w http.ResponseWriter, req
 	if advCtx != nil {
 		dropNames = append(dropNames, advisor.KiroToolName)
 	}
+	if wsCtx != nil {
+		dropNames = append(dropNames, websearch.KiroToolName)
+	}
 	orch := &serverToolOrchestrator{
 		service: s,
 		tsCtx:   tsCtx,
 		advCtx:  advCtx,
+		wsCtx:   wsCtx,
 		req:     req,
 		creds:   creds,
 		buildOpts: reqconv.BuildOptions{
@@ -154,6 +180,7 @@ func (s *Service) runServerTools(ctx context.Context, w http.ResponseWriter, req
 			Effort:         effort,
 			ToolSearchCtx:  tsCtx,
 			AdvisorCtx:     advCtx,
+			WebSearchCtx:   wsCtx,
 		},
 		contextWindowSize: contextWindowSize,
 		responseModel:     responseModel,
