@@ -296,7 +296,8 @@ func (o *serverToolOrchestrator) handleStreaming(ctx context.Context, session *s
 			return ""
 		}
 
-		if interceptedName == websearch.KiroToolName {
+		switch interceptedName {
+		case websearch.KiroToolName:
 			// Web search detected — run the search and emit SSE blocks.
 			srvToolUseID := newServerToolUseID()
 			query, parseErr := parseWebSearchInput(interceptedInput)
@@ -323,7 +324,7 @@ func (o *serverToolOrchestrator) handleStreaming(ctx context.Context, session *s
 			}
 
 			msgs = o.appendWebSearchMessages(msgs, srvToolUseID, searchInput, outcome, sw.RedactedContents())
-		} else if interceptedName == advisor.KiroToolName {
+		case advisor.KiroToolName:
 			// Advisor detected — run the subcall and emit SSE blocks.
 			srvToolUseID := newServerToolUseID()
 			sw.WriteServerToolUse(srvToolUseID, o.advCtx.ToolName, "{}")
@@ -343,7 +344,7 @@ func (o *serverToolOrchestrator) handleStreaming(ctx context.Context, session *s
 			}
 
 			msgs = o.appendAdvisorMessages(msgs, srvToolUseID, outcome, sw.RedactedContents())
-		} else {
+		default:
 			// ToolSearch detected — execute search and emit SSE blocks.
 			query, maxResults, parseErr := parseToolSearchInput(interceptedInput)
 			if parseErr != nil {
@@ -485,7 +486,8 @@ func (o *serverToolOrchestrator) handleNonStreaming(ctx context.Context, w http.
 			break
 		}
 
-		if interceptedName == websearch.KiroToolName {
+		switch interceptedName {
+		case websearch.KiroToolName:
 			// Web search detected — run the search and append blocks.
 			srvToolUseID := newServerToolUseID()
 			query, parseErr := parseWebSearchInput(interceptedInput)
@@ -506,7 +508,7 @@ func (o *serverToolOrchestrator) handleNonStreaming(ctx context.Context, w http.
 			}
 
 			msgs = o.appendWebSearchMessages(msgs, srvToolUseID, searchInput, outcome, acc.RedactedContents())
-		} else if interceptedName == advisor.KiroToolName {
+		case advisor.KiroToolName:
 			// Advisor detected — run the subcall and append blocks.
 			srvToolUseID := newServerToolUseID()
 			outcome := o.consultAdvisor(ctx, short, round, msgs)
@@ -527,7 +529,7 @@ func (o *serverToolOrchestrator) handleNonStreaming(ctx context.Context, w http.
 			}
 
 			msgs = o.appendAdvisorMessages(msgs, srvToolUseID, outcome, acc.RedactedContents())
-		} else {
+		default:
 			// Execute search.
 			query, maxResults, parseErr := parseToolSearchInput(interceptedInput)
 			if parseErr != nil {

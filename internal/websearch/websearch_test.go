@@ -85,8 +85,10 @@ func TestNewContextDefaultsAndPreflight(t *testing.T) {
 
 func TestConsumeStopsAtMaxUses(t *testing.T) {
 	c := NewContext([]anthropic.Tool{{Type: anthropic.ToolTypeWebSearch, MaxUses: 2}}, &stubProvider{}, 0)
-	if !c.Consume() || !c.Consume() {
-		t.Fatal("first two Consume calls must succeed")
+	for i := range 2 {
+		if !c.Consume() {
+			t.Fatalf("Consume %d = false, want true within max_uses", i+1)
+		}
 	}
 	if c.Consume() {
 		t.Error("third Consume = true, want false once max_uses is spent")
