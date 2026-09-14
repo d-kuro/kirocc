@@ -7,7 +7,9 @@ import (
 )
 
 func TestBuildNonStreamingResponse_RedactedThinking(t *testing.T) {
-	// GPT 5.6 order: tool_use / text stream first, redacted blob arrives last.
+	// GPT 5.6 streams the blob last, but the assembled content array puts
+	// reasoning first, the way the Anthropic wire does: a trailing blob makes
+	// Claude Code's final-result extraction drop everything before it.
 	events := []kiroproto.Event{
 		{Type: "toolUseEvent", ToolStop: true, ToolUseID: "call_1", ToolName: "read", ToolInput: `{"path":"/tmp"}`},
 		{Type: kiroproto.EventReasoningContent, RedactedContent: "blob-abc"},
@@ -16,15 +18,15 @@ func TestBuildNonStreamingResponse_RedactedThinking(t *testing.T) {
 	resp, _ := BuildNonStreamingResponse(events, "gpt-5.6-sol", 272000, nil, 0, 0)
 	content := resp["content"].([]any)
 	if len(content) != 2 {
-		t.Fatalf("content len = %d, want 2 (tool_use + redacted_thinking): %v", len(content), content)
+		t.Fatalf("content len = %d, want 2 (redacted_thinking + tool_use): %v", len(content), content)
 	}
-	tu := content[0].(map[string]any)
-	if tu["type"] != "tool_use" || tu["id"] != "call_1" {
-		t.Fatalf("first block = %v, want tool_use call_1", tu)
-	}
-	rt := content[1].(map[string]any)
+	rt := content[0].(map[string]any)
 	if rt["type"] != "redacted_thinking" || rt["data"] != "blob-abc" {
-		t.Fatalf("second block = %v, want redacted_thinking blob-abc", rt)
+		t.Fatalf("first block = %v, want redacted_thinking blob-abc", rt)
+	}
+	tu := content[1].(map[string]any)
+	if tu["type"] != "tool_use" || tu["id"] != "call_1" {
+		t.Fatalf("second block = %v, want tool_use call_1", tu)
 	}
 	if resp["stop_reason"] != "tool_use" {
 		t.Fatalf("stop_reason = %v, want tool_use", resp["stop_reason"])

@@ -117,8 +117,19 @@ func buildResponseFromAcc(acc *responseAccumulator, model string) (map[string]an
 	// Deduplicate tool calls.
 	toolCalls := DeduplicateToolCalls(acc.ToolCalls)
 
-	// Build content array: thinking → text → tool_use.
+	// Build content array: redacted_thinking → thinking → text → tool_use.
+	// Reasoning leads, as it does on the Anthropic wire. A blob placed after
+	// the text makes Claude Code's final-result extraction drop the answer —
+	// it keeps only text following the last thinking block — which is what
+	// empties `claude -p` against Kiro's `auto`. One block per blob, never
+	// concatenated: joining base64 blobs would corrupt them.
 	content := []any{}
+	for _, rc := range acc.RedactedContents {
+		content = append(content, map[string]any{
+			"type": anthropic.BlockTypeRedactedThinking,
+			"data": rc,
+		})
+	}
 	if acc.ThinkingBuf.Len() > 0 {
 		block := map[string]any{
 			"type":     anthropic.BlockTypeThinking,
@@ -148,15 +159,6 @@ func buildResponseFromAcc(acc *responseAccumulator, model string) (map[string]an
 			"id":    tc.ID,
 			"name":  tc.Name,
 			"input": input,
-		})
-	}
-	// Redacted reasoning blobs (GPT 5.6) arrive after text/tool_use in the
-	// upstream stream, so they close the content array — matching the
-	// streaming emission order. One block per blob, never concatenated.
-	for _, rc := range acc.RedactedContents {
-		content = append(content, map[string]any{
-			"type": anthropic.BlockTypeRedactedThinking,
-			"data": rc,
 		})
 	}
 

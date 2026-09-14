@@ -25,6 +25,17 @@ type SSEWriter struct {
 	writeErr   error
 	acc        responseAccumulator
 
+	// pendingRedacted holds redacted_thinking blobs that have arrived but are
+	// not yet written downstream, so a blob that turns out to trail the whole
+	// answer can be dropped instead of emitted. Kiro's `auto` router sends its
+	// blob after the text block; Anthropic always puts reasoning first, and
+	// Claude Code's final-result extraction keeps only text that follows the
+	// last thinking block — so a trailing blob silently empties the result for
+	// `claude -p` and the SDK. Flushed in arrival order ahead of the next
+	// visible block, which leaves the GPT 5.6 ordering (blob with its tool
+	// round) byte-identical.
+	pendingRedacted []string
+
 	// advisorIterations accumulates advisor consultation usage across rounds;
 	// emitted as usage.iterations[] in the final message_delta.
 	advisorIterations []AdvisorIteration
@@ -106,18 +117,7 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 	case kiroproto.EventReasoningContent:
 		if d.RedactedContent != "" {
 			s.ensureStarted()
-			s.closeActiveBlock()
-			s.blockIndex++
-			s.activeType = anthropic.BlockTypeRedactedThinking
-			s.writeSSE("content_block_start", map[string]any{
-				"type":  "content_block_start",
-				"index": s.blockIndex,
-				"content_block": map[string]any{
-					"type": anthropic.BlockTypeRedactedThinking,
-					"data": d.RedactedContent,
-				},
-			})
-			s.closeActiveBlock()
+			s.pendingRedacted = append(s.pendingRedacted, d.RedactedContent)
 			if d.StopSignal {
 				return s.stopOrDrain()
 			}
@@ -144,6 +144,7 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 		}
 		s.ensureStarted()
 		s.fireVisibleOutput()
+		s.flushPendingRedacted()
 		s.closeActiveBlock()
 		s.blockIndex++
 		s.activeType = anthropic.BlockTypeToolUse
@@ -202,6 +203,25 @@ func (s *SSEWriter) Finish() error {
 		s.writeDelta("text_delta", "text", textDelta)
 	}
 
+	// A blob still pending here trailed the whole answer. Drop it only when
+	// there is visible text for it to hide: Claude Code's final-result
+	// extraction keeps just the text following the last thinking block, so a
+	// trailing blob turns a perfectly good answer into "". Nothing is lost by
+	// dropping it, because replay only ever attaches a blob to a round that
+	// carries a tool call (buildHistory sets ReasoningContent only for an
+	// assistant entry with toolUses).
+	//
+	// Both other cases keep the blob. A round with a tool call needs it for
+	// replay — the GPT 5.6 drain path. A round with no text and no tool call
+	// has nothing else to show, so emitting it is strictly better than sending
+	// empty content: that is a max_tokens-truncated reasoning-only response,
+	// and the retryable variant is caught by IsEmptyVisibleEndTurn instead.
+	if s.acc.TextBuf.Len() > 0 && !s.acc.HasToolUse {
+		s.pendingRedacted = nil
+	} else {
+		s.flushPendingRedacted()
+	}
+
 	s.closeActiveBlock()
 
 	// Do NOT inject an empty text block here. If this is a thinking-only
@@ -246,6 +266,7 @@ func (s *SSEWriter) ensureStarted() {
 }
 
 func (s *SSEWriter) switchBlock(blockType string) {
+	s.flushPendingRedacted()
 	if s.activeType == blockType {
 		return
 	}
@@ -277,6 +298,31 @@ func (s *SSEWriter) switchBlock(blockType string) {
 	})
 }
 
+// flushPendingRedacted writes any deferred redacted_thinking blobs as their own
+// content blocks, in arrival order, ahead of whatever block opens next. A blob
+// that genuinely precedes text or a tool call therefore keeps the position it
+// arrived in; only one left pending at Finish is reconsidered.
+func (s *SSEWriter) flushPendingRedacted() {
+	if len(s.pendingRedacted) == 0 {
+		return
+	}
+	blobs := s.pendingRedacted
+	s.pendingRedacted = nil
+	s.closeActiveBlock()
+	for _, data := range blobs {
+		s.blockIndex++
+		s.writeSSE("content_block_start", map[string]any{
+			"type":  "content_block_start",
+			"index": s.blockIndex,
+			"content_block": map[string]any{
+				"type": anthropic.BlockTypeRedactedThinking,
+				"data": data,
+			},
+		})
+		s.writeRawSSE("content_block_stop", `{"type":"content_block_stop","index":%d}`, s.blockIndex)
+	}
+}
+
 func (s *SSEWriter) closeActiveBlock() {
 	if s.activeType == "" {
 		return
@@ -289,6 +335,7 @@ func (s *SSEWriter) closeActiveBlock() {
 // sequence for a single self-contained block (tool_use, server_tool_use, tool_search results).
 // closes any previously active block first. delta may be nil when no delta event is needed.
 func (s *SSEWriter) writeBlock(contentBlock, delta map[string]any) {
+	s.flushPendingRedacted()
 	s.closeActiveBlock()
 	s.blockIndex++
 	s.writeSSE("content_block_start", map[string]any{

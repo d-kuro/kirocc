@@ -2,6 +2,7 @@ package respconv
 
 import (
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -500,5 +501,170 @@ func TestSSEWriter_MaxTokensRedactedOnly_StopsImmediately(t *testing.T) {
 	}
 	if !strings.Contains(body, "message_stop") {
 		t.Fatalf("missing message_stop: %s", body)
+	}
+}
+
+// sseBlockOrder returns the content-block types in emission order, plus the
+// content_block_start indices, so a test can assert both ordering and that
+// dropping a block left no gap in the index sequence.
+func sseBlockOrder(t *testing.T, body string) (types []string, indices []int) {
+	t.Helper()
+	for line := range strings.SplitSeq(body, "\n") {
+		data, ok := strings.CutPrefix(line, "data: ")
+		if !ok {
+			continue
+		}
+		var e struct {
+			Type         string `json:"type"`
+			Index        int    `json:"index"`
+			ContentBlock struct {
+				Type string `json:"type"`
+			} `json:"content_block"`
+		}
+		if err := json.Unmarshal([]byte(data), &e); err != nil {
+			continue
+		}
+		if e.Type != "content_block_start" {
+			continue
+		}
+		types = append(types, e.ContentBlock.Type)
+		indices = append(indices, e.Index)
+	}
+	return types, indices
+}
+
+func assertContiguousIndices(t *testing.T, indices []int) {
+	t.Helper()
+	for i, got := range indices {
+		if got != i {
+			t.Fatalf("content_block_start indices = %v, want 0..%d contiguous", indices, len(indices)-1)
+		}
+	}
+}
+
+// Kiro's `auto` router trails its reasoning blob after the text block. Claude
+// Code's final-result extraction keeps only text that follows the last thinking
+// block, so emitting that blob empties `claude -p`. The blob has nothing to
+// replay in a round with no tool call, so it must be dropped.
+func TestSSEWriter_AutoTrailingRedacted_DroppedSoTextSurvives(t *testing.T) {
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "auto", 1000000, nil, 0, 0)
+
+	sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "OK"})
+	sw.HandleEvent(kiroproto.Event{Type: kiroproto.EventReasoningContent, RedactedContent: "blob-trailing"})
+	if err := sw.Finish(); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	body := w.Body.String()
+	if strings.Contains(body, "redacted_thinking") {
+		t.Fatalf("trailing blob must not reach the client: %s", body)
+	}
+	if strings.Contains(body, "blob-trailing") {
+		t.Fatalf("blob payload leaked: %s", body)
+	}
+	if !strings.Contains(body, `"text":"OK"`) && !strings.Contains(body, `"text_delta","text":"OK"`) {
+		t.Fatalf("answer text missing: %s", body)
+	}
+	types, indices := sseBlockOrder(t, body)
+	if len(types) != 1 || types[0] != "text" {
+		t.Fatalf("blocks = %v, want exactly one text block", types)
+	}
+	assertContiguousIndices(t, indices)
+}
+
+// A blob that genuinely precedes the text is the Anthropic convention and is
+// kept where it arrived — dropping it would lose reasoning the client may echo.
+func TestSSEWriter_LeadingRedacted_KeptBeforeText(t *testing.T) {
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "auto", 1000000, nil, 0, 0)
+
+	sw.HandleEvent(kiroproto.Event{Type: kiroproto.EventReasoningContent, RedactedContent: "blob-leading"})
+	sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "OK"})
+	if err := sw.Finish(); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "blob-leading") {
+		t.Fatalf("leading blob must be preserved: %s", body)
+	}
+	types, indices := sseBlockOrder(t, body)
+	if len(types) != 2 || types[0] != "redacted_thinking" || types[1] != "text" {
+		t.Fatalf("blocks = %v, want [redacted_thinking text]", types)
+	}
+	assertContiguousIndices(t, indices)
+}
+
+// An interior blob keeps its position: text after it proves it was not
+// trailing, and in a reasoning-model round that position is what attributes the
+// blob to a tool call. Only a blob left pending at the end of the round is
+// reconsidered. Real `auto` output never takes this shape — it sends one text
+// block then one trailing blob, even for a long multi-paragraph answer.
+func TestSSEWriter_InteriorRedacted_KeepsPosition(t *testing.T) {
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "gpt-5.6-sol", 272000, nil, 0, 0)
+
+	sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "HEAD"})
+	sw.HandleEvent(kiroproto.Event{Type: kiroproto.EventReasoningContent, RedactedContent: "blob-mid"})
+	sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: " TAIL"})
+	if err := sw.Finish(); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "blob-mid") {
+		t.Fatalf("interior blob must keep its position: %s", body)
+	}
+	if !strings.Contains(body, "HEAD") || !strings.Contains(body, "TAIL") {
+		t.Fatalf("both halves of the answer must be present: %s", body)
+	}
+	types, indices := sseBlockOrder(t, body)
+	if len(types) != 3 || types[0] != "text" || types[1] != "redacted_thinking" || types[2] != "text" {
+		t.Fatalf("blocks = %v, want [text redacted_thinking text]", types)
+	}
+	assertContiguousIndices(t, indices)
+}
+
+// A round carrying a tool call still needs its blob: buildHistory replays it as
+// ReasoningContent for the in-flight round (the GPT 5.6 drain path).
+func TestSSEWriter_TrailingRedactedWithToolUse_Kept(t *testing.T) {
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "gpt-5.6-sol", 272000, nil, 0, 0)
+
+	sw.HandleEvent(kiroproto.Event{Type: "toolUseEvent", ToolStop: true, ToolUseID: "toolu_1", ToolName: "read", ToolInput: `{"path":"/tmp"}`})
+	sw.HandleEvent(kiroproto.Event{Type: kiroproto.EventReasoningContent, RedactedContent: "blob-replayable"})
+	if err := sw.Finish(); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "blob-replayable") {
+		t.Fatalf("a tool round's blob must be kept for replay: %s", body)
+	}
+	types, indices := sseBlockOrder(t, body)
+	if len(types) != 2 || types[0] != "tool_use" || types[1] != "redacted_thinking" {
+		t.Fatalf("blocks = %v, want [tool_use redacted_thinking]", types)
+	}
+	assertContiguousIndices(t, indices)
+}
+
+// A reasoning-only round has nothing else to show, so the blob is still
+// emitted rather than leaving the client with empty content. The retryable
+// variant of this shape is caught by IsEmptyVisibleEndTurn instead.
+func TestSSEWriter_RedactedOnly_StillEmitted(t *testing.T) {
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "auto", 1000000, nil, 0, 0)
+
+	sw.HandleEvent(kiroproto.Event{Type: kiroproto.EventReasoningContent, RedactedContent: "blob-only"})
+	if err := sw.Finish(); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	if body := w.Body.String(); !strings.Contains(body, "blob-only") {
+		t.Fatalf("reasoning-only round must not send empty content: %s", body)
+	}
+	if !sw.IsEmptyVisibleEndTurn() {
+		t.Fatal("reasoning-only round must still be flagged for retry")
 	}
 }
