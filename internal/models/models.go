@@ -205,12 +205,6 @@ func effectiveMappings() []Mapping {
 // Upstream `kiroModel` is never `[1m]`-suffixed — it always comes from
 // mapping tables. KIROCC_MODEL_MAPPINGS env var can override mappings.
 func Resolve(model string, context1M bool) (kiroModel string, thinking bool, contextWindowSize int, anthropicModel string) {
-	// Auto passes `auto` through to the Kiro backend and bypasses
-	// thinking/effort resolution.
-	if model == "auto" || model == "claude-auto" {
-		return "auto", false, 0, model
-	}
-
 	model = normalizeThinkingSuffix(model)
 
 	var matchedWindowSize int
@@ -276,6 +270,12 @@ func Resolve(model string, context1M bool) (kiroModel string, thinking bool, con
 		}
 	} else {
 		anthropicModel = matchedAnthropic
+	}
+
+	// Apply Auto semantics to the resolved SKU so explicit mappings retain
+	// precedence. Auto aliases cannot opt into thinking or a fixed 1M window.
+	if kiroModel == "auto" {
+		return "auto", false, 0, strings.TrimSuffix(model, ThinkingSuffix)
 	}
 
 	// Route to the mapping's 1M SKU when any signal asked for it: the
