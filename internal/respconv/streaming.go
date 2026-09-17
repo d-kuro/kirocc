@@ -103,7 +103,7 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 
 	switch e.Type {
 	case kiroproto.EventAssistantResponse:
-		if e.Content != "" {
+		if d.HasAssistantContent {
 			s.pendingRedactedBeforeText = len(s.pendingRedacted)
 		}
 		// Handle thinking delta from tag parsing.

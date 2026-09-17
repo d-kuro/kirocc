@@ -14,15 +14,18 @@ const (
 
 // EventDelta holds the per-event delta information produced by responseAccumulator.
 type EventDelta struct {
-	TextDelta       string
-	ThinkingDelta   string
-	RedactedContent string
-	ToolStop        bool
-	ToolUseID       string
-	ToolName        string
-	ToolInput       string
-	IsError         bool
-	ErrorMessage    string
+	// HasAssistantContent excludes empty thinking tags, but includes content
+	// held by the tag/stop parser that has not produced a delta yet.
+	HasAssistantContent bool
+	TextDelta           string
+	ThinkingDelta       string
+	RedactedContent     string
+	ToolStop            bool
+	ToolUseID           string
+	ToolName            string
+	ToolInput           string
+	IsError             bool
+	ErrorMessage        string
 	// Stop signal fields — set when adapter-side stop is triggered.
 	StopSignal   bool
 	StopReason   string // StopReasonStopSequence or StopReasonMaxTokens

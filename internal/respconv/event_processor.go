@@ -15,6 +15,7 @@ func (a *responseAccumulator) ProcessEvent(e kiroproto.Event) EventDelta {
 	case kiroproto.EventAssistantResponse:
 		if e.Content != "" && !a.LocalStop {
 			textOut, thinkingOut := a.parseThinkingTags(e.Content)
+			d.HasAssistantContent = textOut != "" || thinkingOut != "" || a.thinkingTagBuf != ""
 			if thinkingOut != "" {
 				a.accumulateThinking(thinkingOut, &d)
 			}
