@@ -35,6 +35,10 @@ type SSEWriter struct {
 	// visible block, which leaves the GPT 5.6 ordering (blob with its tool
 	// round) byte-identical.
 	pendingRedacted []string
+	// Prefix of pendingRedacted that arrived before the latest text event.
+	// That event may be held by the tag/stop parser until Finish, so these
+	// blobs must precede its text while later blobs can still be dropped.
+	pendingRedactedBeforeText int
 
 	// advisorIterations accumulates advisor consultation usage across rounds;
 	// emitted as usage.iterations[] in the final message_delta.
@@ -99,6 +103,9 @@ func (s *SSEWriter) HandleEvent(e kiroproto.Event) bool {
 
 	switch e.Type {
 	case kiroproto.EventAssistantResponse:
+		if e.Content != "" {
+			s.pendingRedactedBeforeText = len(s.pendingRedacted)
+		}
 		// Handle thinking delta from tag parsing.
 		if d.ThinkingDelta != "" {
 			s.writeThinkingDelta(d)
@@ -194,6 +201,16 @@ func (s *SSEWriter) Finish() error {
 	s.ensureStarted()
 
 	textDelta, thinkingDelta, res := finalizeResult(&s.acc)
+	// Decide which blobs trail the answer before switchBlock can flush them
+	// ahead of text that was held for tag/stop matching. Keep any prefix that
+	// preceded the held content, and keep every blob needed for tool replay.
+	if s.acc.TextBuf.Len() > 0 && !s.acc.HasToolUse {
+		keep := 0
+		if textDelta != "" || thinkingDelta != "" {
+			keep = s.pendingRedactedBeforeText
+		}
+		s.pendingRedacted = s.pendingRedacted[:keep]
+	}
 	if thinkingDelta != "" {
 		s.writeThinkingDelta(EventDelta{ThinkingDelta: thinkingDelta})
 	}
@@ -203,24 +220,9 @@ func (s *SSEWriter) Finish() error {
 		s.writeDelta("text_delta", "text", textDelta)
 	}
 
-	// A blob still pending here trailed the whole answer. Drop it only when
-	// there is visible text for it to hide: Claude Code's final-result
-	// extraction keeps just the text following the last thinking block, so a
-	// trailing blob turns a perfectly good answer into "". Nothing is lost by
-	// dropping it, because replay only ever attaches a blob to a round that
-	// carries a tool call (buildHistory sets ReasoningContent only for an
-	// assistant entry with toolUses).
-	//
-	// Both other cases keep the blob. A round with a tool call needs it for
-	// replay — the GPT 5.6 drain path. A round with no text and no tool call
-	// has nothing else to show, so emitting it is strictly better than sending
-	// empty content: that is a max_tokens-truncated reasoning-only response,
-	// and the retryable variant is caught by IsEmptyVisibleEndTurn instead.
-	if s.acc.TextBuf.Len() > 0 && !s.acc.HasToolUse {
-		s.pendingRedacted = nil
-	} else {
-		s.flushPendingRedacted()
-	}
+	// Tool and reasoning-only rounds retain their blobs even without a next
+	// text block to flush them. IsEmptyVisibleEndTurn still detects retries.
+	s.flushPendingRedacted()
 
 	s.closeActiveBlock()
 
@@ -303,6 +305,7 @@ func (s *SSEWriter) switchBlock(blockType string) {
 // that genuinely precedes text or a tool call therefore keeps the position it
 // arrived in; only one left pending at Finish is reconsidered.
 func (s *SSEWriter) flushPendingRedacted() {
+	s.pendingRedactedBeforeText = 0
 	if len(s.pendingRedacted) == 0 {
 		return
 	}
