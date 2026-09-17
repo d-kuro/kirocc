@@ -13,10 +13,7 @@ import (
 // sizeBytes long, padded inside the user message.
 func body(sizeBytes int) string {
 	const tmpl = `{"model":"claude-sonnet-4","max_tokens":16,"messages":[{"role":"user","content":%q}]}`
-	pad := sizeBytes - len(fmt.Sprintf(tmpl, ""))
-	if pad < 1 {
-		pad = 1
-	}
+	pad := max(sizeBytes-len(fmt.Sprintf(tmpl, "")), 1)
 	return fmt.Sprintf(tmpl, strings.Repeat("x", pad))
 }
 
