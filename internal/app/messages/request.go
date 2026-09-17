@@ -44,7 +44,7 @@ func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 	// entries: server-side tool definitions are filtered and replaced by their
 	// synthetic Kiro tools exactly as the live /v1/messages payload does.
 	effort := resolveEffort(r.Context(), kiroModel, req, thinking)
-	tsCtx, advCtx := newServerToolContexts(req)
+	tsCtx, advCtx, wsCtx := s.newServerToolContexts(req)
 
 	payload, _, err := reqconv.BuildPayload(req, reqconv.BuildOptions{
 		ProfileARN:     profileARN,
@@ -53,6 +53,7 @@ func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 		Effort:         effort,
 		ToolSearchCtx:  tsCtx,
 		AdvisorCtx:     advCtx,
+		WebSearchCtx:   wsCtx,
 	})
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())

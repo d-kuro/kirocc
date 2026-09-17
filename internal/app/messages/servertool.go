@@ -18,14 +18,15 @@ import (
 	"github.com/d-kuro/kirocc/internal/reqconv"
 	"github.com/d-kuro/kirocc/internal/respconv"
 	"github.com/d-kuro/kirocc/internal/toolsearch"
+	"github.com/d-kuro/kirocc/internal/websearch"
 	"github.com/google/uuid"
 )
 
 const maxToolSearchRounds = 3
 
 // maxServerToolRounds caps the combined inner loop across all server-side
-// tools (tool search + advisor) so a pathological executor cannot ping-pong
-// between them indefinitely.
+// tools (tool search + advisor + web search) so a pathological executor cannot
+// ping-pong between them indefinitely.
 const maxServerToolRounds = 6
 
 // roundTotals accumulates per-round usage across tool-search rounds and folds
@@ -62,12 +63,13 @@ func (t roundTotals) creditsWith(credits float64, hasCredits bool) (float64, boo
 	return t.credits + credits, t.hasCredits || hasCredits
 }
 
-// serverToolOrchestrator manages the inner loop for server-side tools
-// (tool search and advisor). Either context may be nil; at least one is set.
+// serverToolOrchestrator manages the inner loop for server-side tools (tool
+// search, advisor and web search). Any context may be nil; at least one is set.
 type serverToolOrchestrator struct {
 	service           *Service
 	tsCtx             *toolsearch.Context
 	advCtx            *advisor.Context
+	wsCtx             *websearch.Context
 	req               *anthropic.Request
 	creds             *auth.Credentials
 	buildOpts         reqconv.BuildOptions
@@ -99,9 +101,10 @@ func newServerToolUseID() string {
 }
 
 // maxRounds returns the inner-loop round cap: the historical tool-search cap
-// when only tool search is active, the combined cap when advisor is present.
+// when only tool search is active, the combined cap once another server-side
+// tool can also consume rounds.
 func (o *serverToolOrchestrator) maxRounds() int {
-	if o.advCtx != nil {
+	if o.advCtx != nil || o.wsCtx != nil {
 		return maxServerToolRounds
 	}
 	return maxToolSearchRounds
@@ -293,7 +296,35 @@ func (o *serverToolOrchestrator) handleStreaming(ctx context.Context, session *s
 			return ""
 		}
 
-		if interceptedName == advisor.KiroToolName {
+		switch interceptedName {
+		case websearch.KiroToolName:
+			// Web search detected — run the search and emit SSE blocks.
+			srvToolUseID := newServerToolUseID()
+			query, parseErr := parseWebSearchInput(interceptedInput)
+			searchInput := map[string]any{"query": query}
+			inputBytes, _ := json.Marshal(searchInput)
+			sw.WriteServerToolUse(srvToolUseID, o.wsCtx.ToolName, string(inputBytes))
+
+			// A malformed input is the executor's mistake, not the client's, so
+			// it comes back as invalid_tool_input rather than failing the
+			// request — the model can then call the tool again correctly.
+			outcome := webSearchOutcome{errorCode: anthropic.WebSearchErrorInvalidToolInput}
+			if parseErr == nil {
+				outcome = o.executeWebSearch(ctx, short, round, query)
+			} else {
+				slog.WarnContext(ctx, "web search input parse error", "trace_id", short, "err", parseErr)
+			}
+			if outcome.errorCode != "" {
+				sw.WriteWebSearchError(srvToolUseID, outcome.errorCode)
+			} else {
+				sw.WriteWebSearchResult(srvToolUseID, outcome.results)
+			}
+			if sw.WriteErr() != nil || session.Err() != nil {
+				return ""
+			}
+
+			msgs = o.appendWebSearchMessages(msgs, srvToolUseID, searchInput, outcome, sw.RedactedContents())
+		case advisor.KiroToolName:
 			// Advisor detected — run the subcall and emit SSE blocks.
 			srvToolUseID := newServerToolUseID()
 			sw.WriteServerToolUse(srvToolUseID, o.advCtx.ToolName, "{}")
@@ -313,7 +344,7 @@ func (o *serverToolOrchestrator) handleStreaming(ctx context.Context, session *s
 			}
 
 			msgs = o.appendAdvisorMessages(msgs, srvToolUseID, outcome, sw.RedactedContents())
-		} else {
+		default:
 			// ToolSearch detected — execute search and emit SSE blocks.
 			query, maxResults, parseErr := parseToolSearchInput(interceptedInput)
 			if parseErr != nil {
@@ -455,7 +486,29 @@ func (o *serverToolOrchestrator) handleNonStreaming(ctx context.Context, w http.
 			break
 		}
 
-		if interceptedName == advisor.KiroToolName {
+		switch interceptedName {
+		case websearch.KiroToolName:
+			// Web search detected — run the search and append blocks.
+			srvToolUseID := newServerToolUseID()
+			query, parseErr := parseWebSearchInput(interceptedInput)
+			searchInput := map[string]any{"query": query}
+
+			outcome := webSearchOutcome{errorCode: anthropic.WebSearchErrorInvalidToolInput}
+			if parseErr == nil {
+				outcome = o.executeWebSearch(ctx, short, round, query)
+			} else {
+				slog.WarnContext(ctx, "web search input parse error", "trace_id", short, "err", parseErr)
+			}
+
+			orderedBlocks = append(orderedBlocks, respconv.ServerToolUseBlock(srvToolUseID, o.wsCtx.ToolName, searchInput))
+			if outcome.errorCode != "" {
+				orderedBlocks = append(orderedBlocks, respconv.WebSearchErrorBlock(srvToolUseID, outcome.errorCode))
+			} else {
+				orderedBlocks = append(orderedBlocks, respconv.WebSearchResultBlock(srvToolUseID, outcome.results))
+			}
+
+			msgs = o.appendWebSearchMessages(msgs, srvToolUseID, searchInput, outcome, acc.RedactedContents())
+		case advisor.KiroToolName:
 			// Advisor detected — run the subcall and append blocks.
 			srvToolUseID := newServerToolUseID()
 			outcome := o.consultAdvisor(ctx, short, round, msgs)
@@ -476,7 +529,7 @@ func (o *serverToolOrchestrator) handleNonStreaming(ctx context.Context, w http.
 			}
 
 			msgs = o.appendAdvisorMessages(msgs, srvToolUseID, outcome, acc.RedactedContents())
-		} else {
+		default:
 			// Execute search.
 			query, maxResults, parseErr := parseToolSearchInput(interceptedInput)
 			if parseErr != nil {
@@ -543,6 +596,91 @@ func (o *serverToolOrchestrator) handleNonStreaming(ctx context.Context, w http.
 
 	logResponseStats(ctx, short, totals.inputTokens, totals.outputTokens, false, 0, o.contextWindowSize, totals.credits, totals.hasCredits)
 	return ""
+}
+
+// webSearchOutcome is the result of one web search. Exactly one of errorCode
+// or results is meaningful: a non-empty errorCode means the search failed and
+// must surface as web_search_tool_result_error.
+type webSearchOutcome struct {
+	errorCode string
+	results   []websearch.Result
+}
+
+// executeWebSearch performs one search: preflight checks, use accounting, then
+// the provider call. A failure never aborts the client request — it comes back
+// as an error code the executor can read and route around, which is how the
+// real API reports a failed search.
+func (o *serverToolOrchestrator) executeWebSearch(ctx context.Context, short string, round int, query string) webSearchOutcome {
+	if o.wsCtx.PreflightError != "" {
+		return webSearchOutcome{errorCode: o.wsCtx.PreflightError}
+	}
+	if !o.wsCtx.Consume() {
+		slog.InfoContext(ctx, "web search max uses exceeded",
+			"trace_id", short, "round", round+1, "max_uses", o.wsCtx.MaxUses)
+		return webSearchOutcome{errorCode: anthropic.WebSearchErrorMaxUsesExceeded}
+	}
+	results, err := o.wsCtx.Search(ctx, query)
+	if err != nil {
+		code := websearch.ErrorCode(err)
+		slog.WarnContext(ctx, "web search failed",
+			"trace_id", short, "round", round+1,
+			"provider", o.wsCtx.ProviderName(), "error_code", code, "err", err)
+		return webSearchOutcome{errorCode: code}
+	}
+	slog.InfoContext(ctx, "web search executed",
+		"trace_id", short, "round", round+1,
+		"provider", o.wsCtx.ProviderName(), "query", query, "results", len(results),
+	)
+	return webSearchOutcome{results: results}
+}
+
+// appendWebSearchMessages appends the server_tool_use + tool_result messages to
+// the conversation. The result text is rendered by reqconv.ServerToolResultText,
+// the same function that renders this round when a client replays it from
+// history, so the executor sees identical text either way.
+func (o *serverToolOrchestrator) appendWebSearchMessages(msgs []anthropic.Message, srvToolUseID string, searchInput map[string]any, outcome webSearchOutcome, redacted []string) []anthropic.Message {
+	isError := outcome.errorCode != ""
+	var inner []anthropic.ContentBlock
+	if isError {
+		inner = []anthropic.ContentBlock{{
+			Type:      anthropic.BlockTypeWebSearchResultError,
+			ErrorCode: outcome.errorCode,
+		}}
+	} else {
+		inner = make([]anthropic.ContentBlock, 0, len(outcome.results))
+		for _, r := range outcome.results {
+			inner = append(inner, anthropic.ContentBlock{
+				Type:    anthropic.BlockTypeWebSearchResult,
+				Title:   r.Title,
+				URL:     r.URL,
+				PageAge: r.PageAge,
+			})
+		}
+	}
+	resultText := reqconv.ServerToolResultText(anthropic.ContentBlock{
+		Type:    anthropic.BlockTypeWebSearchToolResult,
+		Content: anthropic.MessageContent{Blocks: inner},
+	})
+	if resultText == "" {
+		// A search that matched nothing has to say so: an empty tool result
+		// reads as a failed call and the executor searches again.
+		resultText = "No web search results."
+	}
+	return appendServerToolRound(msgs, srvToolUseID, websearch.KiroToolName, searchInput, resultText, isError, redacted)
+}
+
+// parseWebSearchInput extracts the query from the web search tool input JSON.
+func parseWebSearchInput(input string) (string, error) {
+	var parsed struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal([]byte(input), &parsed); err != nil {
+		return "", fmt.Errorf("parse web_search input: %w", err)
+	}
+	if parsed.Query == "" {
+		return "", fmt.Errorf("parse web_search input: empty query")
+	}
+	return parsed.Query, nil
 }
 
 // executeSearch runs the tool search, promotes results, and logs.

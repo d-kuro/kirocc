@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/d-kuro/kirocc/internal/logging"
+	"github.com/d-kuro/kirocc/internal/websearch"
 )
 
 const (
@@ -45,6 +46,10 @@ type Config struct {
 	OTelBodyLimit     int
 	KeepAliveInterval time.Duration
 	LogFile           logging.LogFileConfig
+	// WebSearch configures in-proxy emulation of Anthropic's web_search tool.
+	// Disabled unless a provider is named: the queries leave this machine for a
+	// third-party search API, so it is opt-in.
+	WebSearch websearch.Config
 }
 
 // regionPattern matches the region forms Kiro uses ("us-east-1",
@@ -112,6 +117,15 @@ func ApplyEnvOverrides(cfg *Config) error {
 	if err := applyDuration("KIROCC_KEEPALIVE_INTERVAL", &cfg.KeepAliveInterval); err != nil {
 		return err
 	}
+	applyString("KIROCC_WEB_SEARCH_PROVIDER", &cfg.WebSearch.Provider)
+	applyString("KIROCC_WEB_SEARCH_API_KEY", &cfg.WebSearch.APIKey)
+	applyString("KIROCC_WEB_SEARCH_URL", &cfg.WebSearch.URL)
+	if err := applyInt("KIROCC_WEB_SEARCH_MAX_RESULTS", &cfg.WebSearch.MaxResults); err != nil {
+		return err
+	}
+	if err := applyDuration("KIROCC_WEB_SEARCH_TIMEOUT", &cfg.WebSearch.Timeout); err != nil {
+		return err
+	}
 	applyString("KIROCC_LOG_FILE", &cfg.LogFile.Path)
 	if err := applyInt("KIROCC_LOG_MAX_SIZE", &cfg.LogFile.MaxSize); err != nil {
 		return err
@@ -151,6 +165,9 @@ func (c *Config) Validate() error {
 		if len(c.KiroAPIRegion) > maxRegionLen || !regionPattern.MatchString(c.KiroAPIRegion) {
 			return fmt.Errorf("kiro-api-region must be a lowercase region like us-east-1, got %q", c.KiroAPIRegion)
 		}
+	}
+	if err := c.WebSearch.Validate(); err != nil {
+		return err
 	}
 	return nil
 }

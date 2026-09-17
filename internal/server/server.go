@@ -7,6 +7,7 @@ import (
 	messagesapp "github.com/d-kuro/kirocc/internal/app/messages"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
 	"github.com/d-kuro/kirocc/internal/tracing"
+	"github.com/d-kuro/kirocc/internal/websearch"
 )
 
 // ServerOption configures a Server.
@@ -25,6 +26,15 @@ func WithCapture(enabled bool) ServerOption {
 	return func(s *Server) { s.captureEnabled = enabled }
 }
 
+// WithWebSearch enables in-proxy emulation of the web_search_20250305 server
+// tool through the given provider.
+func WithWebSearch(provider websearch.Provider, maxResults int) ServerOption {
+	return func(s *Server) {
+		s.webSearch = provider
+		s.webSearchMaxResults = maxResults
+	}
+}
+
 // WithKeepAliveInterval sets the idle interval for streaming SSE comments.
 // A zero duration disables keep-alive comments.
 func WithKeepAliveInterval(interval time.Duration) ServerOption {
@@ -33,13 +43,15 @@ func WithKeepAliveInterval(interval time.Duration) ServerOption {
 
 // Server is the HTTP server for the kirocc proxy.
 type Server struct {
-	apiKey            string
-	otel              bool
-	otelBodyLimit     int
-	captureEnabled    bool
-	keepAliveInterval time.Duration
-	mux               *http.ServeMux
-	messages          *messagesapp.Service
+	apiKey              string
+	otel                bool
+	otelBodyLimit       int
+	captureEnabled      bool
+	keepAliveInterval   time.Duration
+	webSearch           websearch.Provider
+	webSearchMaxResults int
+	mux                 *http.ServeMux
+	messages            *messagesapp.Service
 }
 
 // New creates a new Server.
@@ -54,6 +66,7 @@ func New(authMgr messagesapp.TokenGetter, apiKey string, client kiroclient.Clien
 	s.messages = messagesapp.New(authMgr, client,
 		messagesapp.WithCapture(s.captureEnabled),
 		messagesapp.WithKeepAliveInterval(s.keepAliveInterval),
+		messagesapp.WithWebSearch(s.webSearch, s.webSearchMaxResults),
 	)
 	s.registerRoutes()
 	return s
