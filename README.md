@@ -36,8 +36,27 @@ Just set `ANTHROPIC_BASE_URL` from any Anthropic API client (e.g., Claude Code) 
 ### Homebrew
 
 ```bash
-brew install d-kuro/tap/kirocc
+brew install d-kuro/tap/kirocc --trust
 ```
+
+`d-kuro/tap` ships both a **cask** and a **formula**. `brew install` resolves to the
+formula, which installs the binary to `$(brew --prefix)/bin` so `kirocc` works as a
+plain command. The formula also supports `brew services` for background use.
+
+#### Run as a service (recommended)
+
+The Homebrew formula installs a launchd-managed service so kirocc starts at login
+and stays running:
+
+```bash
+brew services start d-kuro/tap/kirocc   # start now and at login
+brew services list                      # verify it shows "Started"
+brew services stop d-kuro/tap/kirocc    # stop it
+```
+
+Within the service, kirocc resolves its default credential database relative to your
+home directory, so no extra configuration is needed for it to find the existing Kiro CLI
+login.
 
 ### go install
 

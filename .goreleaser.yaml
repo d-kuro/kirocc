@@ -56,6 +56,37 @@ homebrew_casks:
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/kirocc"]
           end
 
+brews:
+  - name: kirocc
+    repository:
+      owner: d-kuro
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/d-kuro/kirocc"
+    description: "Local proxy server that relays Anthropic Messages API requests to the Kiro backend"
+    license: "Apache-2.0"
+    url_template: "https://github.com/d-kuro/kirocc/releases/download/{{.Tag}}/{{.ArtifactName}}"
+    targets:
+      - darwin_arm64
+      - darwin_amd64
+    service: |
+      run [opt_bin/"kirocc"]
+      keep_alive true
+      log_path var/"log/kirocc.log"
+      error_log_path var/"log/kirocc.log"
+      working_dir Dir.home
+    extra_install: |
+      if OS.mac?
+        quiet_system "/usr/bin/xattr", "-d", "com.apple.quarantine", bin/"kirocc"
+      end
+    caveats: |
+      kirocc is a local proxy that needs Kiro CLI installed and logged in.
+    test: |
+      output = shell_output("#{bin}/kirocc -h 2>&1")
+      assert_match "listen port", output
+      assert_match "kiro-api-key", output
+
 release:
   draft: false
   prerelease: auto
