@@ -44,6 +44,13 @@ type SSEWriter struct {
 	// emitted as usage.iterations[] in the final message_delta.
 	advisorIterations []AdvisorIteration
 
+	// safeguardResults carries auto mode's server-side classifier verdicts. It
+	// can only be set once the response's tool uses exist, since the payload is
+	// keyed by their ids — which is why it rides on the terminal message_delta
+	// rather than message_start. Writer-level state, like advisorIterations, so
+	// it survives the per-round ResetAccumulator in the server-tool loop.
+	safeguardResults []any
+
 	// drainOnStop keeps the stream draining after an adapter-side stop when a
 	// completed tool call exists, so a trailing reasoningContentEvent blob
 	// (GPT 5.6) can still be captured. Set by the caller for models that emit
@@ -233,12 +240,19 @@ func (s *SSEWriter) Finish() error {
 	if iters := IterationMaps(s.advisorIterations); iters != nil {
 		res.Usage["iterations"] = iters
 	}
+	delta := map[string]any{
+		"stop_reason":   res.StopReason,
+		"stop_sequence": res.StopSequence,
+	}
+	// Streamed verdicts go *inside* delta, not at the event's top level: the
+	// client checks `"safeguard_results" in Es.delta` on the message_delta event
+	// (2.1.278). A copy at the top level is ignored.
+	if s.safeguardResults != nil {
+		delta["safeguard_results"] = s.safeguardResults
+	}
 	s.writeSSE("message_delta", map[string]any{
-		"type": "message_delta",
-		"delta": map[string]any{
-			"stop_reason":   res.StopReason,
-			"stop_sequence": res.StopSequence,
-		},
+		"type":  "message_delta",
+		"delta": delta,
 		"usage": res.Usage,
 	})
 	s.writeSSE("message_stop", map[string]any{
@@ -456,6 +470,20 @@ func (s *SSEWriter) ThinkingLen() int {
 // round. Dropped server-tool calls are excluded, so this answers "does the
 // client still owe us a tool result".
 func (s *SSEWriter) HasToolUse() bool { return s.acc.HasToolUse }
+
+// ToolCalls returns the client-visible tool calls recorded this round, in
+// arrival order. Dropped server-tool calls are excluded, which is what a
+// safeguard classifier wants: the client only asks for verdicts on actions it
+// will actually be offered.
+func (s *SSEWriter) ToolCalls() []ToolCall { return s.acc.ToolCalls }
+
+// SetSafeguardResults attaches auto mode's classifier verdicts, emitted inside
+// the terminal message_delta by Finish. Call it after the round's tool calls are
+// known and before Finish; a nil payload leaves the key off entirely, which
+// makes the client fall back to its own classifier for the rest of the session.
+func (s *SSEWriter) SetSafeguardResults(results []any) {
+	s.safeguardResults = results
+}
 
 // SetDropToolNames sets the tool names to filter from accumulator recording.
 func (s *SSEWriter) SetDropToolNames(names ...string) {

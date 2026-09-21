@@ -24,6 +24,11 @@ type NonStreamingStats struct {
 // NonStreamingAccumulator wraps responseAccumulator for incremental non-streaming processing.
 type NonStreamingAccumulator struct {
 	acc responseAccumulator
+	// safeguardResults carries auto mode's classifier verdicts. On a
+	// non-streamed response the client reads them from the message's own
+	// top-level key, unlike the streamed case where they ride inside the
+	// terminal message_delta's delta object.
+	safeguardResults []any
 }
 
 // NewNonStreamingAccumulator creates a new accumulator for non-streaming responses.
@@ -52,9 +57,22 @@ func (n *NonStreamingAccumulator) SetToolNameMap(m map[string]string) {
 	n.acc.toolNameMap = m
 }
 
+// ToolCalls returns the client-visible tool calls recorded, in arrival order.
+func (n *NonStreamingAccumulator) ToolCalls() []ToolCall { return n.acc.ToolCalls }
+
+// SetSafeguardResults attaches auto mode's classifier verdicts to the response
+// BuildResponse will produce. A nil payload leaves the key off.
+func (n *NonStreamingAccumulator) SetSafeguardResults(results []any) {
+	n.safeguardResults = results
+}
+
 // BuildResponse builds the final Anthropic response from accumulated events.
 func (n *NonStreamingAccumulator) BuildResponse(model string) (map[string]any, NonStreamingStats) {
-	return buildResponseFromAcc(&n.acc, model)
+	resp, stats := buildResponseFromAcc(&n.acc, model)
+	if n.safeguardResults != nil {
+		resp["safeguard_results"] = n.safeguardResults
+	}
+	return resp, stats
 }
 
 // FinalizeText finalizes the stream and returns the accumulated visible text,

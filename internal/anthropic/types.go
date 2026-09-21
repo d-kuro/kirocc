@@ -18,6 +18,38 @@ type Request struct {
 	Stream        bool            `json:"stream"`
 	Thinking      *ThinkingConfig `json:"thinking,omitempty"`
 	OutputConfig  *OutputConfig   `json:"output_config,omitempty"`
+	Safeguards    []Safeguard     `json:"safeguards,omitempty"`
+}
+
+// SafeguardDangerousToolUse is the only safeguard type Claude Code sends, paired
+// with the "dangerous-tool-use-*" beta.
+const SafeguardDangerousToolUse = "dangerous_tool_use"
+
+// Safeguard is one entry of the `safeguards` request field. Claude Code sends it
+// when auto mode asks whoever answers /v1/messages to classify the tool uses the
+// response is about to emit, and expects a matching `safeguard_results` back on
+// that same response.
+//
+// ClassifierContext stays raw on purpose. It is the session's policy background
+// — permission rules and their sources, trusted directories, git state, platform,
+// auto-mode allow/deny lists — and the shape belongs to the client, which
+// versions it with its own `v` field. Modelling those keys here would mean
+// chasing every Claude Code release; passing the document through untouched
+// would not.
+type Safeguard struct {
+	Type              string         `json:"type"`
+	ClassifierContext jsontext.Value `json:"classifier_context,omitzero"`
+}
+
+// DangerousToolUseSafeguard returns the dangerous_tool_use entry from the
+// request, or nil when the client did not ask for server-side classification.
+func (r *Request) DangerousToolUseSafeguard() *Safeguard {
+	for i := range r.Safeguards {
+		if r.Safeguards[i].Type == SafeguardDangerousToolUse {
+			return &r.Safeguards[i]
+		}
+	}
+	return nil
 }
 
 // OutputConfig represents the output_config field in the Anthropic API.
