@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/d-kuro/kirocc/internal/anthropic"
 )
@@ -32,21 +31,32 @@ func TestSearchQueryLimitCountsRunes(t *testing.T) {
 	}
 }
 
-// collapseSpace must truncate on a rune boundary; slicing raw bytes would split
-// a multi-byte character and emit invalid UTF-8.
-func TestCollapseSpaceTruncatesOnRuneBoundary(t *testing.T) {
-	got := collapseSpace(strings.Repeat("あ", maxSnippetLen+50))
-	if !utf8.ValidString(got) {
-		t.Fatalf("collapseSpace produced invalid UTF-8: %q", got)
+// Snippets and provider error lines are capped in runes, never bytes: slicing
+// raw bytes would split a multi-byte character and emit invalid UTF-8.
+func TestTruncation(t *testing.T) {
+	firstLineOf := func(s string) string { return firstLine([]byte(s)) }
+	truncateTo3 := func(s string) string { return truncateRunes(s, 3) }
+	cases := []struct {
+		name string
+		fn   func(string) string
+		in   string
+		want string
+	}{
+		{"truncateRunes under the limit", truncateTo3, "ab", "ab"},
+		{"truncateRunes at the limit", truncateTo3, "あいう", "あいう"},
+		{"truncateRunes cuts on a rune boundary", truncateTo3, "あいうえ", "あいう…"},
+		{"truncateRunes trims space before the ellipsis", truncateTo3, "ab cd", "ab…"},
+		{"collapseSpace collapses whitespace", collapseSpace, "  a   b  ", "a b"},
+		{"collapseSpace caps at maxSnippetLen", collapseSpace, strings.Repeat("あ", maxSnippetLen+50), strings.Repeat("あ", maxSnippetLen) + "…"},
+		{"firstLine keeps only the first line", firstLineOf, "  bad request\nstack trace  ", "bad request"},
+		{"firstLine caps at maxErrorLineLen", firstLineOf, strings.Repeat("あ", maxErrorLineLen+50) + "\nsecond line", strings.Repeat("あ", maxErrorLineLen) + "…"},
 	}
-	trimmed := strings.TrimSuffix(got, "…")
-	if n := utf8.RuneCountInString(trimmed); n != maxSnippetLen {
-		t.Errorf("truncated to %d runes, want %d", n, maxSnippetLen)
-	}
-	// A snippet already within the limit is returned unchanged (spaces
-	// collapsed), with no ellipsis.
-	if got := collapseSpace("  a   b  "); got != "a b" {
-		t.Errorf("collapseSpace(short) = %q, want %q", got, "a b")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.fn(tc.in); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
