@@ -18,6 +18,8 @@ func TestResolveEffort(t *testing.T) {
 		thinkingType string // request thinking.type ("" = absent)
 	}{
 		// Explicit effort passes through (validated against the model enum).
+		{"explicit max on opus-5.5", "claude-opus-5.5", "max", false, "max", ""},
+		{"explicit xhigh on opus-5.5", "claude-opus-5.5", "xhigh", true, "xhigh", ""},
 		{"explicit max on opus-5", "claude-opus-5", "max", false, "max", ""},
 		{"explicit xhigh on opus-5", "claude-opus-5", "xhigh", true, "xhigh", ""},
 		{"explicit max on opus-4.8", "claude-opus-4.8", "max", false, "max", ""},

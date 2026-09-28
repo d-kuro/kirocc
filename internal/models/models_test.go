@@ -18,6 +18,35 @@ func TestResolve(t *testing.T) {
 		wantAnthropicModel string
 	}{
 		{
+			name:               "claude-opus-5-5 always resolves to 1m without thinking",
+			model:              "claude-opus-5-5",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
+			name:               "claude-opus-5-5[1m] exact-match preserves suffix without thinking",
+			model:              "claude-opus-5-5[1m]",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
+			name:               "claude-opus-5-5 with context1M keeps thinking off",
+			model:              "claude-opus-5-5",
+			context1M:          true,
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
+			name:               "kiro dotted claude-opus-5.5 resolves to hyphen anthropic form",
+			model:              "claude-opus-5.5",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
 			name:               "claude-opus-5 uses 1m context without thinking",
 			model:              "claude-opus-5",
 			wantKiroModel:      "claude-opus-5",
@@ -443,6 +472,10 @@ func TestListModels(t *testing.T) {
 			checkModel: "claude-sonnet-5",
 		},
 		{
+			name:       "claude-opus-5.5 is listed exactly once (both alias rows dedupe to one Kiro value)",
+			checkModel: "claude-opus-5.5",
+		},
+		{
 			name:       "claude-opus-5 is listed exactly once (both alias rows dedupe to one Kiro value)",
 			checkModel: "claude-opus-5",
 		},
@@ -518,6 +551,7 @@ func TestListModels_DisplayNames(t *testing.T) {
 		{id: "gpt-5.6-sol"},
 		{id: "claude-opus-5"},
 		// Always-1M models: one labelled `[1m]` entry each.
+		{id: "claude-opus-5-5[1m]", want: "Opus 5.5 (1M context)"},
 		{id: "claude-opus-5[1m]", want: "Opus 5 (1M context)"},
 		{id: "claude-opus-4-8[1m]", want: "Opus 4.8 (1M context)"},
 		{id: "claude-opus-4-7[1m]", want: "Opus 4.7 (1M context)"},

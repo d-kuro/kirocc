@@ -44,6 +44,7 @@ var (
 // table do not support effort.
 var effortCapabilities = map[string]effortCapability{
 	// 5-value enum (includes xhigh); 128000 max-output models.
+	"claude-opus-5.5":  {levels: fullEffortLevels},
 	"claude-opus-5":    {levels: fullEffortLevels},
 	"claude-opus-4.8":  {levels: fullEffortLevels},
 	"claude-opus-4.7":  {levels: fullEffortLevels},

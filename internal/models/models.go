@@ -78,12 +78,14 @@ const (
 // Uses exact key matching against both Anthropic and Kiro fields (first match wins).
 // Order matters: specific entries must precede legacy aliases that share the same Kiro value.
 var modelMapOrdered = []Mapping{
+	{Anthropic: "claude-opus-5-5[1m]", Kiro: "claude-opus-5.5", Kiro1M: "claude-opus-5.5", DisplayName: "Opus 5.5"},
 	{Anthropic: "claude-opus-5[1m]", Kiro: "claude-opus-5", Kiro1M: "claude-opus-5", DisplayName: "Opus 5"},
 	{Anthropic: "claude-opus-4-8[1m]", Kiro: "claude-opus-4.8", Kiro1M: "claude-opus-4.8", DisplayName: "Opus 4.8"},
 	{Anthropic: "claude-opus-4-7[1m]", Kiro: "claude-opus-4.7", Kiro1M: "claude-opus-4.7", DisplayName: "Opus 4.7"},
 	{Anthropic: "claude-opus-4-6[1m]", Kiro: "claude-opus-4.6", Kiro1M: "claude-opus-4.6", DisplayName: "Opus 4.6"},
 	{Anthropic: "claude-sonnet-5[1m]", Kiro: "claude-sonnet-5", Kiro1M: "claude-sonnet-5", DisplayName: "Sonnet 5"},
 	{Anthropic: "claude-fable-5-1[1m]", Kiro: "claude-fable-5.1", Kiro1M: "claude-fable-5.1", DisplayName: "Fable 5.1"},
+	{Anthropic: "claude-opus-5-5", Kiro: "claude-opus-5.5", Kiro1M: "claude-opus-5.5"},
 	{Anthropic: "claude-opus-5", Kiro: "claude-opus-5", Kiro1M: "claude-opus-5"},
 	{Anthropic: "claude-opus-4-8", Kiro: "claude-opus-4.8", Kiro1M: "claude-opus-4.8"},
 	{Anthropic: "claude-opus-4-7", Kiro: "claude-opus-4.7", Kiro1M: "claude-opus-4.7"},
