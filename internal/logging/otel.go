@@ -61,7 +61,10 @@ func (h *otelHandler) Handle(ctx context.Context, r slog.Record) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	b, err := json.Marshal(rec)
+	// Strings may hold invalid UTF-8 (e.g. an upstream body cut at a byte
+	// offset). Replace it rather than fail: slog.Logger discards Handle's error,
+	// so a failed marshal silently drops the whole line.
+	b, err := json.Marshal(rec, jsontext.AllowInvalidUTF8(true))
 	if err != nil {
 		return fmt.Errorf("marshal otel log: %w", err)
 	}

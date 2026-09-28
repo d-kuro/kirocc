@@ -404,6 +404,37 @@ func TestOTelHandler_JSONTextValue(t *testing.T) {
 	})
 }
 
+func TestOTelHandler_InvalidUTF8(t *testing.T) {
+	cut := "あ"[:2] // the first two bytes of a three-byte character
+	var buf bytes.Buffer
+	slog.New(NewOTelHandler(&buf, slog.LevelDebug)).Warn("msg "+cut,
+		"payload", "raw "+cut,
+		"data", map[string]any{"v": "x" + cut},
+		"raw", jsontext.Value(`{"v":"x`+cut+`"}`),
+	)
+
+	var rec map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %q", err, buf.String())
+	}
+	attrs, _ := rec["attributes"].(map[string]any)
+	data, _ := attrs["data"].(map[string]any)
+	for _, tt := range []struct {
+		name string
+		got  any
+		want string
+	}{
+		{"body", rec["body"], "msg \ufffd\ufffd"},
+		{"string attribute", attrs["payload"], "raw \ufffd\ufffd"},
+		{"nested map value", data["v"], "x\ufffd\ufffd"},
+		{"raw JSON value falls back to a string", attrs["raw"], `{"v":"x` + "\ufffd\ufffd" + `"}`},
+	} {
+		if tt.got != tt.want {
+			t.Errorf("%s = %q, want %q", tt.name, tt.got, tt.want)
+		}
+	}
+}
+
 func TestOTelHandler_LevelFiltering(t *testing.T) {
 	tests := []struct {
 		name     string
