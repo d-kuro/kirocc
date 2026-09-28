@@ -123,7 +123,9 @@ func expandAssistantMessage(msg anthropic.Message) []anthropic.Message {
 func serverToolResultIsError(b anthropic.ContentBlock) bool {
 	for _, inner := range b.Content.Blocks {
 		switch inner.Type {
-		case anthropic.BlockTypeAdvisorResultError, anthropic.BlockTypeToolSearchResultError:
+		case anthropic.BlockTypeAdvisorResultError,
+			anthropic.BlockTypeToolSearchResultError,
+			anthropic.BlockTypeWebSearchResultError:
 			return true
 		}
 	}
@@ -152,6 +154,18 @@ func ServerToolResultText(b anthropic.ContentBlock) string {
 			add("advisor error: " + inner.ErrorCode)
 		case anthropic.BlockTypeToolSearchResultError:
 			add("tool search error: " + inner.ErrorCode)
+		case anthropic.BlockTypeWebSearchResultError:
+			add("web search error: " + inner.ErrorCode)
+		case anthropic.BlockTypeWebSearchResult:
+			// Title and URL are what a client is guaranteed to carry back, and
+			// the URL is the part the executor has to cite.
+			if inner.URL != "" {
+				line := inner.URL
+				if inner.Title != "" {
+					line = inner.Title + " — " + inner.URL
+				}
+				add(line)
+			}
 		case anthropic.BlockTypeText:
 			add(inner.Text)
 		case anthropic.BlockTypeToolSearchSearchResult:

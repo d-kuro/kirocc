@@ -7,6 +7,7 @@ import (
 	"github.com/d-kuro/kirocc/internal/auth"
 	"github.com/d-kuro/kirocc/internal/config"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
+	"github.com/d-kuro/kirocc/internal/websearch"
 )
 
 // TokenGetter loads valid upstream credentials for a request.
@@ -21,6 +22,11 @@ type Service struct {
 	captureEnabled    bool
 	keepAliveInterval time.Duration
 	maxRequestBody    int64
+	// webSearch runs the searches for an emulated web_search_20250305 tool.
+	// Nil disables the emulation, in which case a request carrying that tool is
+	// refused rather than answered without the search.
+	webSearch           websearch.Provider
+	webSearchMaxResults int
 }
 
 // Option configures a Service.
@@ -31,6 +37,15 @@ type Option func(*Service)
 // when debug logging is on.
 func WithCapture(enabled bool) Option {
 	return func(s *Service) { s.captureEnabled = enabled }
+}
+
+// WithWebSearch enables in-proxy emulation of the web_search_20250305 server
+// tool through the given provider. A nil provider leaves it disabled.
+func WithWebSearch(provider websearch.Provider, maxResults int) Option {
+	return func(s *Service) {
+		s.webSearch = provider
+		s.webSearchMaxResults = maxResults
+	}
 }
 
 // WithKeepAliveInterval sets the idle interval for SSE keep-alive comments.

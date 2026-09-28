@@ -164,6 +164,13 @@ type ContentBlock struct {
 	StopReason       string `json:"stop_reason,omitempty"`
 	ErrorCode        string `json:"error_code,omitempty"`
 
+	// web_search_result (nested inside web_search_tool_result content). Read
+	// back when a client replays a search round from history, so the executor
+	// sees the pages it already found instead of an empty round.
+	Title   string `json:"title,omitempty"`
+	URL     string `json:"url,omitempty"`
+	PageAge string `json:"page_age,omitempty"`
+
 	// cache_control (prompt caching)
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
@@ -182,7 +189,9 @@ func (b ContentBlock) IsToolResult() bool {
 // that appears inside an assistant response (paired with a server_tool_use in
 // the same message), as opposed to a user-authored tool_result.
 func (b ContentBlock) IsServerToolResult() bool {
-	return b.Type == BlockTypeToolSearchToolResult || b.Type == BlockTypeAdvisorToolResult
+	return b.Type == BlockTypeToolSearchToolResult ||
+		b.Type == BlockTypeAdvisorToolResult ||
+		b.Type == BlockTypeWebSearchToolResult
 }
 
 // ImageSource represents the source of an image content block.
@@ -205,6 +214,23 @@ const (
 
 // ToolTypeAdvisor is the advisor server-side tool definition type.
 const ToolTypeAdvisor = "advisor_20260301"
+
+// ToolTypeWebSearch is the web search server-side tool definition type. Claude
+// Code sends it for every WebSearch call, in a dedicated side query with
+// tool_choice forced to it.
+const ToolTypeWebSearch = "web_search_20250305"
+
+// WebSearchToolName is the name the web search tool is always registered under.
+const WebSearchToolName = "web_search"
+
+// Web search tool result error codes.
+const (
+	WebSearchErrorInvalidToolInput = "invalid_tool_input"
+	WebSearchErrorUnavailable      = "unavailable"
+	WebSearchErrorMaxUsesExceeded  = "max_uses_exceeded"
+	WebSearchErrorTooManyRequests  = "too_many_requests"
+	WebSearchErrorQueryTooLong     = "query_too_long"
+)
 
 // AdvisorToolName is the name the advisor tool is always registered under.
 const AdvisorToolName = "advisor"
@@ -237,6 +263,9 @@ const (
 	BlockTypeAdvisorResult          = "advisor_result"
 	BlockTypeAdvisorRedactedResult  = "advisor_redacted_result"
 	BlockTypeAdvisorResultError     = "advisor_tool_result_error"
+	BlockTypeWebSearchToolResult    = "web_search_tool_result"
+	BlockTypeWebSearchResult        = "web_search_result"
+	BlockTypeWebSearchResultError   = "web_search_tool_result_error"
 )
 
 // Tool represents a tool definition in the Anthropic API.
@@ -255,6 +284,11 @@ type Tool struct {
 	MaxUses   int             `json:"max_uses,omitzero"`
 	MaxTokens int             `json:"max_tokens,omitzero"`
 	Caching   *AdvisorCaching `json:"caching,omitempty"`
+
+	// web_search_20250305 fields. The domain lists are mutually exclusive and
+	// constrain which results may be returned.
+	AllowedDomains []string `json:"allowed_domains,omitempty"`
+	BlockedDomains []string `json:"blocked_domains,omitempty"`
 }
 
 // AdvisorCaching is the advisor tool's caching configuration.
@@ -290,11 +324,16 @@ func (t Tool) IsAdvisorTool() bool {
 	return t.Type == ToolTypeAdvisor
 }
 
+// IsWebSearchTool reports whether this tool is a web search tool definition.
+func (t Tool) IsWebSearchTool() bool {
+	return t.Type == ToolTypeWebSearch
+}
+
 // IsServerTool reports whether this tool is a server-side tool that kirocc
 // emulates in-proxy and must never forward to the Kiro backend as a callable
 // function tool.
 func (t Tool) IsServerTool() bool {
-	return t.IsToolSearchTool() || t.IsAdvisorTool()
+	return t.IsToolSearchTool() || t.IsAdvisorTool() || t.IsWebSearchTool()
 }
 
 // CallableTools returns the tools that should be forwarded to the Kiro backend
@@ -319,6 +358,16 @@ func CallableTools(tools []Tool) []Tool {
 func FindAdvisorTool(tools []Tool) *Tool {
 	for i := range tools {
 		if tools[i].IsAdvisorTool() {
+			return &tools[i]
+		}
+	}
+	return nil
+}
+
+// FindWebSearchTool returns the web search tool definition, if present.
+func FindWebSearchTool(tools []Tool) *Tool {
+	for i := range tools {
+		if tools[i].IsWebSearchTool() {
 			return &tools[i]
 		}
 	}
