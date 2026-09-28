@@ -32,7 +32,7 @@ func sanitizedHeaderAttrs(prefix string, h http.Header) []attribute.KeyValue {
 // prefix examples: "http.request", "http.response", "kiro.request".
 func recordBodyEvent(span trace.Span, prefix string, body []byte, truncated bool, totalSize int) {
 	span.AddEvent(prefix+".body", trace.WithAttributes(
-		attribute.String(prefix+".body", toValidUTF8(body)),
+		attribute.String(prefix+".body", string(body)),
 		attribute.Bool(prefix+".body.truncated", truncated),
 		attribute.Int(prefix+".body.size", totalSize),
 	))

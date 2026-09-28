@@ -27,19 +27,13 @@ func Init(ctx context.Context) (shutdown func(context.Context) error, err error)
 		return nil, fmt.Errorf("create otlp exporter: %w", err)
 	}
 
-	res, err := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceName(ServiceName),
-		),
-	)
+	res, err := newResource(resource.Default())
 	if err != nil {
 		return nil, fmt.Errorf("create resource: %w", err)
 	}
 
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
+		sdktrace.WithBatcher(validUTF8Exporter{exporter}),
 		sdktrace.WithResource(res),
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 	)
@@ -51,6 +45,21 @@ func Init(ctx context.Context) (shutdown func(context.Context) error, err error)
 	))
 
 	return tp.Shutdown, nil
+}
+
+// newResource names the service on top of base. It also replaces invalid
+// UTF-8 in the attributes, which validUTF8Exporter leaves alone: the default
+// resource includes OTEL_RESOURCE_ATTRIBUTES, which the SDK percent-decodes
+// without validating, and a bad value there would fail every export.
+func newResource(base *resource.Resource) (*resource.Resource, error) {
+	res, err := resource.Merge(base, resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.ServiceName(ServiceName),
+	))
+	if err != nil {
+		return nil, err
+	}
+	return resource.NewWithAttributes(res.SchemaURL(), validUTF8Attrs(res.Attributes())...), nil
 }
 
 // Tracer returns the package-level OTel tracer.
