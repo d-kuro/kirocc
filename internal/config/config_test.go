@@ -321,3 +321,43 @@ func TestConfig_Validate(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyEnvOverrides_DebugImpliesRecording(t *testing.T) {
+	want := defaultJevRecordFile()
+	if want == "" {
+		t.Skip("no home dir; default record path unavailable")
+	}
+
+	t.Run("debug on, record file unset -> default", func(t *testing.T) {
+		t.Setenv("KIROCC_DEBUG", "true")
+		cfg := Config{}
+		if err := ApplyEnvOverrides(&cfg); err != nil {
+			t.Fatalf("ApplyEnvOverrides: %v", err)
+		}
+		if cfg.SafeguardRecordFile != want {
+			t.Errorf("record file = %q, want default %q", cfg.SafeguardRecordFile, want)
+		}
+	})
+
+	t.Run("debug on, explicit record file wins", func(t *testing.T) {
+		t.Setenv("KIROCC_DEBUG", "true")
+		t.Setenv("KIROCC_SAFEGUARD_RECORD_FILE", "/tmp/explicit.jsonl")
+		cfg := Config{}
+		if err := ApplyEnvOverrides(&cfg); err != nil {
+			t.Fatalf("ApplyEnvOverrides: %v", err)
+		}
+		if cfg.SafeguardRecordFile != "/tmp/explicit.jsonl" {
+			t.Errorf("record file = %q, want the explicit path", cfg.SafeguardRecordFile)
+		}
+	})
+
+	t.Run("debug off, record file unset -> stays off", func(t *testing.T) {
+		cfg := Config{}
+		if err := ApplyEnvOverrides(&cfg); err != nil {
+			t.Fatalf("ApplyEnvOverrides: %v", err)
+		}
+		if cfg.SafeguardRecordFile != "" {
+			t.Errorf("record file = %q, want empty (recording off)", cfg.SafeguardRecordFile)
+		}
+	})
+}

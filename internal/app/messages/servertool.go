@@ -268,6 +268,11 @@ func (o *serverToolOrchestrator) handleStreaming(ctx context.Context, session *s
 		if interceptedName == "" {
 			// streamErr was already handled above; only success/localStop reach here.
 			if !localStop {
+				// Verdicts cover this round's client-visible tool calls, which is
+				// all of them: the loop only continues when a *server* tool was
+				// intercepted, so a call the client can act on ends the round.
+				// Any id we miss simply falls back to the client's classifier.
+				o.service.attachSafeguards(ctx, o.req, sw)
 				if err := sw.Finish(); err != nil {
 					return ""
 				}
@@ -357,6 +362,7 @@ func (o *serverToolOrchestrator) handleStreaming(ctx context.Context, session *s
 		// Max rounds reached without normal completion.
 		slog.WarnContext(ctx, "server tool max rounds reached", "trace_id", short, "max_rounds", o.maxRounds())
 	}
+	o.service.attachSafeguards(ctx, o.req, sw)
 	if err := sw.Finish(); err != nil {
 		return ""
 	}
@@ -378,6 +384,11 @@ func (o *serverToolOrchestrator) handleNonStreaming(ctx context.Context, w http.
 	msgs := slices.Clone(o.req.Messages)
 
 	var orderedBlocks []any
+	// Client-visible tool calls across every round, for the safeguard verdicts.
+	// This path assembles its response from per-round accumulators rather than
+	// one, so the calls are gathered explicitly instead of read off an
+	// accumulator at the end.
+	var visibleToolCalls []respconv.ToolCall
 	var totals roundTotals
 	var iterations []respconv.AdvisorIteration
 	var lastStopReason string
@@ -433,6 +444,7 @@ func (o *serverToolOrchestrator) handleNonStreaming(ctx context.Context, w http.
 		}
 
 		resp, stats := acc.BuildResponse(o.responseModel)
+		visibleToolCalls = append(visibleToolCalls, acc.ToolCalls()...)
 		totals.addCompleted(stats.InputTokens, stats.OutputTokens, stats.Credits, stats.HasCredits)
 		lastStopReason, _ = resp["stop_reason"].(string)
 		lastStopSequence = resp["stop_sequence"]
@@ -533,6 +545,11 @@ func (o *serverToolOrchestrator) handleNonStreaming(ctx context.Context, w http.
 		"stop_reason":   lastStopReason,
 		"stop_sequence": lastStopSequence,
 		"usage":         usage,
+	}
+	sgTarget := &collectedSafeguardTarget{calls: visibleToolCalls}
+	o.service.attachSafeguards(ctx, o.req, sgTarget)
+	if sgTarget.results != nil {
+		finalResp["safeguard_results"] = sgTarget.results
 	}
 
 	w.Header().Set("Content-Type", "application/json")

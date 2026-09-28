@@ -43,7 +43,49 @@ type Config struct {
 	// ModelDiscovery enables fetching Kiro's model catalog at startup so newly
 	// launched models resolve without a kirocc release. Built-in mappings always
 	// win; discovery only fills gaps.
-	ModelDiscovery    bool
+	ModelDiscovery bool
+	// Safeguard enables answering auto mode's `safeguards` request field. On by
+	// default: a keyless free provider means it works with no key. Set false
+	// (-safeguard=false / KIROCC_SAFEGUARD=false) to leave the field unanswered,
+	// so Claude Code falls back to its own classifier -- the behaviour before
+	// kirocc answered the field.
+	Safeguard bool
+	// SafeguardAPIKey is a TypeSafe API key. With one, kirocc adds the paid
+	// TypeSafe endpoint as a fallback behind the free provider. Without one, the
+	// keyless free provider answers alone. Named after TypeSafe's own variable
+	// rather than the KIROCC_* convention, since it is their credential, not
+	// kirocc's.
+	SafeguardAPIKey string
+	// SafeguardKeyFile is a path to read the TypeSafe key from when
+	// SafeguardAPIKey is not set directly. It lets the key live in a 0600 file
+	// rather than the environment, so the bridge picks it up however it is
+	// launched — a background/daemon start does not source an interactive
+	// shell's rc file, so a key exported only in ~/.zshrc never reaches it.
+	// Defaults to ~/.config/kiro/typesafe-key; a missing file is not an error.
+	SafeguardKeyFile string
+	// SafeguardEndpoint and SafeguardModel override the TypeSafe endpoint and
+	// model id. Empty means the package defaults.
+	SafeguardEndpoint string
+	SafeguardModel    string
+	// SafeguardQuestions is a path to a questions JSON that overrides the
+	// built-in classification prompt, so it can be retuned without a rebuild.
+	// Empty uses the default prompt.
+	SafeguardQuestions string
+	// SafeguardRecordFile, when set, appends a replayable JSON-lines record of
+	// each real Jev judgment (request, answers, verdict) for after-the-fact
+	// review and classifier tuning. Empty disables recording. Off by default.
+	SafeguardRecordFile string
+	// SafeguardProviders is the ordered, comma-separated list of Jev providers
+	// to try (e.g. "opencode,typesafe"). Failover walks it in order. Empty means
+	// the default chain: the keyless free opencode endpoint first, then typesafe
+	// (only when a key is set) as a paid fallback.
+	SafeguardProviders string
+	// SafeguardFailover controls whether a provider error falls through to the
+	// next provider in the chain. Default true.
+	SafeguardFailover bool
+	// OpenCodeAPIKey is an optional key for the OpenCode Zen provider. The free
+	// model (jev-1.13-free) is keyless, so this is only needed for a keyed tier.
+	OpenCodeAPIKey    string
 	Debug             bool
 	OTel              bool
 	OTelBodyLimit     int
@@ -102,6 +144,21 @@ func ApplyEnvOverrides(cfg *Config) error {
 	// kiro-cli needs no kirocc-specific configuration.
 	applyString("KIRO_API_KEY", &cfg.KiroAPIKey)
 	applyString("KIRO_API_REGION", &cfg.KiroAPIRegion)
+	// TypeSafe's own variable name, for the same reason.
+	applyString("TYPESAFE_API_KEY", &cfg.SafeguardAPIKey)
+	applyString("KIROCC_SAFEGUARD_KEY_FILE", &cfg.SafeguardKeyFile)
+	applyString("KIROCC_SAFEGUARD_RECORD_FILE", &cfg.SafeguardRecordFile)
+	applyString("KIROCC_SAFEGUARD_PROVIDERS", &cfg.SafeguardProviders)
+	applyString("OPENCODE_API_KEY", &cfg.OpenCodeAPIKey)
+	if err := applyBool("KIROCC_SAFEGUARD_FAILOVER", &cfg.SafeguardFailover); err != nil {
+		return err
+	}
+	if err := applyBool("KIROCC_SAFEGUARD", &cfg.Safeguard); err != nil {
+		return err
+	}
+	applyString("KIROCC_SAFEGUARD_ENDPOINT", &cfg.SafeguardEndpoint)
+	applyString("KIROCC_SAFEGUARD_MODEL", &cfg.SafeguardModel)
+	applyString("KIROCC_SAFEGUARD_QUESTIONS", &cfg.SafeguardQuestions)
 	applyString("KIROCC_HOST", &cfg.Host)
 	if err := applyBool("KIROCC_MODEL_DISCOVERY", &cfg.ModelDiscovery); err != nil {
 		return err
@@ -140,7 +197,27 @@ func ApplyEnvOverrides(cfg *Config) error {
 	if err := applyBool("KIROCC_LOG_CONSOLE", &cfg.LogFile.Console); err != nil {
 		return err
 	}
+
+	// Debug implies recording Jev judgments, so a debug session always yields
+	// replayable data for `kirocc-jev-replay` and the jev-review skill. An
+	// explicit record file (flag or env) has already been applied above and
+	// wins; to debug without recording, point it at /dev/null.
+	if cfg.Debug && cfg.SafeguardRecordFile == "" {
+		cfg.SafeguardRecordFile = defaultJevRecordFile()
+	}
 	return nil
+}
+
+// defaultJevRecordFile is where Jev judgments are recorded when -debug is on and
+// no record file was set. It sits beside the structured log (~/.cache/kirocc.jsonl)
+// and is what kirocc-jev-replay and the jev-review skill default to. Returns ""
+// when the home directory cannot be resolved, which leaves recording off.
+func defaultJevRecordFile() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".cache", "kirocc-jev.jsonl")
 }
 
 // Validate checks that the config is internally consistent. Returns an error

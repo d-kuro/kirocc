@@ -2,11 +2,13 @@ package messages
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/d-kuro/kirocc/internal/auth"
 	"github.com/d-kuro/kirocc/internal/config"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
+	"github.com/d-kuro/kirocc/internal/safeguard"
 )
 
 // TokenGetter loads valid upstream credentials for a request.
@@ -21,6 +23,11 @@ type Service struct {
 	captureEnabled    bool
 	keepAliveInterval time.Duration
 	maxRequestBody    int64
+	safeguard         *safeguard.Client
+	// degraded counts consecutive responses whose safeguard verdicts fell back
+	// wholesale to the client's own classifier. It drives a single WARN when a
+	// sustained fallback means the field has stopped saving anything.
+	degraded atomic.Int64
 }
 
 // Option configures a Service.
@@ -43,6 +50,13 @@ func WithKeepAliveInterval(interval time.Duration) Option {
 // cap. Defaults to config.DefaultMaxRequestBody when the option is omitted.
 func WithMaxRequestBody(limit int64) Option {
 	return func(s *Service) { s.maxRequestBody = limit }
+}
+
+// WithSafeguard supplies the classifier that answers auto mode's `safeguards`
+// request field. A nil client leaves the field unanswered, which is the default
+// and simply means Claude Code keeps using its own billed classifier.
+func WithSafeguard(c *safeguard.Client) Option {
+	return func(s *Service) { s.safeguard = c }
 }
 
 // New constructs a message service.

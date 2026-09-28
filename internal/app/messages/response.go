@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/httpx"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
 	"github.com/d-kuro/kirocc/internal/kiroproto"
@@ -29,7 +30,7 @@ func roundCredits(c float64) float64 {
 
 const retryReasonEmptyVisibleEndTurn = "empty_visible_end_turn"
 
-func (s *Service) handleStreamingResponse(ctx context.Context, session *streamSession, apiResp *kiroclient.Response, kiroModel, model string, contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int, capture *upstreamAttemptCapture, toolNameMap map[string]string) string {
+func (s *Service) handleStreamingResponse(ctx context.Context, session *streamSession, apiResp *kiroclient.Response, kiroModel, model string, contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int, capture *upstreamAttemptCapture, toolNameMap map[string]string, req *anthropic.Request) string {
 	traceID, short := logging.TraceIDs(ctx)
 
 	sw := respconv.NewSSEWriter(ctx, session, model, contextWindowSize, stopSequences, maxTokens, preCountedInputTokens)
@@ -130,6 +131,9 @@ func (s *Service) handleStreamingResponse(ctx context.Context, session *streamSe
 	}
 
 	if !streamErr && !localStop {
+		// Must precede Finish: the verdicts ride inside the terminal
+		// message_delta that Finish writes.
+		s.attachSafeguards(ctx, req, sw)
 		if err := sw.Finish(); err != nil {
 			return ""
 		}
@@ -173,7 +177,7 @@ func (s *Service) handleStreamingResponse(ctx context.Context, session *streamSe
 	return ""
 }
 
-func (s *Service) handleNonStreamingResponse(ctx context.Context, w http.ResponseWriter, apiResp *kiroclient.Response, model string, contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int, capture *upstreamAttemptCapture, toolNameMap map[string]string) string {
+func (s *Service) handleNonStreamingResponse(ctx context.Context, w http.ResponseWriter, apiResp *kiroclient.Response, model string, contextWindowSize int, stopSequences []string, maxTokens int, preCountedInputTokens int, capture *upstreamAttemptCapture, toolNameMap map[string]string, req *anthropic.Request) string {
 	traceID, short := logging.TraceIDs(ctx)
 	acc := respconv.NewNonStreamingAccumulator(contextWindowSize, stopSequences, maxTokens, preCountedInputTokens)
 	acc.SetToolNameMap(toolNameMap)
@@ -222,6 +226,9 @@ func (s *Service) handleNonStreamingResponse(ctx context.Context, w http.Respons
 		httpx.WriteError(w, classification.final.status, classification.final.jsonType, classification.final.jsonMessage)
 		return ""
 	}
+
+	// Must precede BuildResponse, which is where the key is attached.
+	s.attachSafeguards(ctx, req, acc)
 
 	resp, stats := acc.BuildResponse(model)
 

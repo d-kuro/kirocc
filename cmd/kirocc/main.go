@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/d-kuro/kirocc/internal/kiroclient"
 	"github.com/d-kuro/kirocc/internal/logging"
 	"github.com/d-kuro/kirocc/internal/models"
+	"github.com/d-kuro/kirocc/internal/safeguard"
 	"github.com/d-kuro/kirocc/internal/server"
 	"github.com/d-kuro/kirocc/internal/tokencount"
 	"github.com/d-kuro/kirocc/internal/tracing"
@@ -120,6 +123,16 @@ func parseFlags(args []string) (config.Config, error) {
 	fs.StringVar(&cfg.KiroAPIKey, "kiro-api-key", "", "Kiro API key (ksk_...) to use instead of the kiro-cli database credential; also KIRO_API_KEY")
 	fs.StringVar(&cfg.KiroAPIRegion, "kiro-api-region", "", "region for Kiro API endpoints (runtime.<region>.kiro.dev); overrides the credential's region; also KIRO_API_REGION")
 	fs.BoolVar(&cfg.ModelDiscovery, "model-discovery", true, "fetch Kiro's model catalog at startup so new models resolve without a kirocc update; also KIROCC_MODEL_DISCOVERY")
+	fs.BoolVar(&cfg.Safeguard, "safeguard", true, "answer auto mode's safeguards field (on by default, keyless/free); -safeguard=false leaves it unanswered so Claude Code uses its own classifier; also KIROCC_SAFEGUARD")
+	fs.StringVar(&cfg.SafeguardAPIKey, "safeguard-api-key", "", "TypeSafe API key; adds the paid TypeSafe endpoint as a fallback behind the free provider; also TYPESAFE_API_KEY")
+	fs.StringVar(&cfg.SafeguardKeyFile, "safeguard-key-file", "", "path to read the TypeSafe key from when -safeguard-api-key/TYPESAFE_API_KEY is unset; also KIROCC_SAFEGUARD_KEY_FILE; defaults to ~/.config/kiro/typesafe-key")
+	fs.StringVar(&cfg.SafeguardRecordFile, "safeguard-record-file", "", "append a replayable JSON-lines record of each Jev judgment here (for -replay-jev review/tuning); also KIROCC_SAFEGUARD_RECORD_FILE; off when empty")
+	fs.StringVar(&cfg.SafeguardEndpoint, "safeguard-endpoint", "", "override the TypeSafe endpoint; also KIROCC_SAFEGUARD_ENDPOINT")
+	fs.StringVar(&cfg.SafeguardModel, "safeguard-model", "", "override the TypeSafe model id; also KIROCC_SAFEGUARD_MODEL")
+	fs.StringVar(&cfg.SafeguardQuestions, "safeguard-questions", "", "path to a questions JSON that overrides the default classification prompt; also KIROCC_SAFEGUARD_QUESTIONS")
+	fs.StringVar(&cfg.SafeguardProviders, "safeguard-providers", "", "ordered, comma-separated Jev providers to try (e.g. typesafe,opencode); also KIROCC_SAFEGUARD_PROVIDERS; default: typesafe (if keyed) then keyless-free opencode")
+	fs.BoolVar(&cfg.SafeguardFailover, "safeguard-failover", true, "fall through to the next provider on error; also KIROCC_SAFEGUARD_FAILOVER")
+	fs.StringVar(&cfg.OpenCodeAPIKey, "opencode-api-key", "", "optional key for the OpenCode Zen provider; the free model is keyless, so only needed for a keyed tier; also OPENCODE_API_KEY")
 	fs.BoolVar(&cfg.Debug, "debug", false, "enable debug logging with OTel JSON Lines output")
 	fs.BoolVar(&cfg.OTel, "otel", false, "enable OpenTelemetry tracing (OTLP HTTP exporter)")
 	fs.IntVar(&cfg.OTelBodyLimit, "otel-body-limit", config.DefaultOTelBodyLimit, "max bytes of request body to capture in OTel spans (0 = unlimited)")
@@ -230,7 +243,133 @@ func buildServer(authMgr *auth.AuthManager, client kiroclient.Client, cfg config
 	if cfg.Debug {
 		opts = append(opts, server.WithCapture(true))
 	}
+	if sg := newSafeguardClient(cfg); sg != nil {
+		opts = append(opts, server.WithSafeguard(sg))
+	}
 	return server.New(authMgr, cfg.APIKey, client, opts...)
+}
+
+// newSafeguardClient builds the auto-mode classifier, or returns nil when
+// safeguards are disabled (-safeguard=false), in which case kirocc leaves the
+// field unanswered and Claude Code falls back to its own classifier. Enabled
+// (the default), the provider chain leads with the keyless, free OpenCode Zen
+// endpoint, so it works with no key; a TypeSafe key (flag, env, or key file)
+// appends the paid endpoint as a fallback reached only when the free tier
+// errors, and the chain fails over on error unless -safeguard-failover=false.
+func newSafeguardClient(cfg config.Config) *safeguard.Client {
+	if !cfg.Safeguard {
+		slog.Info("auto mode safeguards disabled (-safeguard=false); client will use its own classifier")
+		return nil
+	}
+	// TypeSafe key: a direct key (flag or TYPESAFE_API_KEY) wins; otherwise read
+	// a key file so a background/daemon start (which never sources an interactive
+	// shell's rc) still picks it up.
+	tsKey := cfg.SafeguardAPIKey
+	if tsKey == "" {
+		if k, from := readSafeguardKeyFile(cfg.SafeguardKeyFile); k != "" {
+			tsKey = k
+			slog.Info("auto mode safeguards: loaded TypeSafe key from file", "path", from)
+		}
+	}
+
+	// Assemble the provider chain from the configured, ordered names. Unknown
+	// names are skipped with a warning. Default order: opencode-free first, then
+	// typesafe (only if keyed) as a paid fallback reached on a free-tier error.
+	names := parseProviderList(cfg.SafeguardProviders)
+	var providers []safeguard.Provider
+	for _, name := range names {
+		switch name {
+		case "typesafe":
+			if tsKey == "" {
+				continue // no key -> nothing to prepend
+			}
+			endpoint := safeguard.DefaultEndpoint
+			model := safeguard.DefaultModel
+			if cfg.SafeguardEndpoint != "" {
+				endpoint = cfg.SafeguardEndpoint
+			}
+			if cfg.SafeguardModel != "" {
+				model = cfg.SafeguardModel
+			}
+			providers = append(providers, safeguard.NewProvider("typesafe", endpoint, model, tsKey))
+		case "opencode":
+			// Keyless by default; an OPENCODE_API_KEY selects a keyed/paid tier.
+			providers = append(providers, safeguard.NewProvider("opencode", safeguard.OpenCodeEndpoint, safeguard.OpenCodeFreeModel, cfg.OpenCodeAPIKey))
+		default:
+			slog.Warn("auto mode safeguards: unknown provider, skipping", "provider", name)
+		}
+	}
+	if len(providers) == 0 {
+		// Everything was unknown or keyless-typesafe-only: fall back to the
+		// keyless opencode default so safeguards still work.
+		providers = []safeguard.Provider{safeguard.NewProvider("opencode", safeguard.OpenCodeEndpoint, safeguard.OpenCodeFreeModel, cfg.OpenCodeAPIKey)}
+	}
+
+	opts := []safeguard.Option{
+		safeguard.WithProviders(providers...),
+		safeguard.WithFailover(cfg.SafeguardFailover),
+	}
+	if cfg.SafeguardQuestions != "" {
+		qs, err := safeguard.LoadQuestions(cfg.SafeguardQuestions)
+		if err != nil {
+			slog.Warn("auto mode safeguards: could not load questions override, using the default prompt", "path", cfg.SafeguardQuestions, "err", err)
+		} else {
+			opts = append(opts, safeguard.WithQuestions(qs))
+			slog.Info("auto mode safeguards: using questions override", "path", cfg.SafeguardQuestions)
+		}
+	}
+	if cfg.SafeguardRecordFile != "" {
+		if rec, err := safeguard.NewFileRecorder(cfg.SafeguardRecordFile); err != nil {
+			slog.Warn("auto mode safeguards: could not open record file, not recording", "path", cfg.SafeguardRecordFile, "err", err)
+		} else {
+			opts = append(opts, safeguard.WithRecorder(rec))
+			slog.Info("auto mode safeguards: recording judgments", "path", cfg.SafeguardRecordFile)
+		}
+	}
+	c := safeguard.New(tsKey, opts...)
+	chosen := make([]string, len(providers))
+	for i, p := range providers {
+		chosen[i] = p.Name()
+	}
+	slog.Info("auto mode safeguards enabled", "providers", strings.Join(chosen, ","), "failover", cfg.SafeguardFailover)
+	return c
+}
+
+// parseProviderList splits the comma-separated provider list, trimming spaces
+// and lowercasing; an empty/blank value yields the default chain.
+func parseProviderList(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return []string{"opencode", "typesafe"}
+	}
+	var out []string
+	for part := range strings.SplitSeq(s, ",") {
+		if p := strings.ToLower(strings.TrimSpace(part)); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return []string{"opencode", "typesafe"}
+	}
+	return out
+}
+
+// readSafeguardKeyFile reads the TypeSafe key from cfg.SafeguardKeyFile, or from
+// ~/.config/kiro/typesafe-key when unset. A missing file is not an error (the
+// bridge simply runs without the classifier); it returns the trimmed key and
+// the path it came from.
+func readSafeguardKeyFile(path string) (key, from string) {
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", ""
+		}
+		path = filepath.Join(home, ".config", "kiro", "typesafe-key")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", "" // missing/unreadable: run without the classifier
+	}
+	return strings.TrimSpace(string(b)), path
 }
 
 func isLoopback(host string) bool {

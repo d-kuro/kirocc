@@ -16,6 +16,7 @@ Just set `ANTHROPIC_BASE_URL` from any Anthropic API client (e.g., Claude Code) 
 - **Custom API region** — Pin the region in `runtime.<region>.kiro.dev` with `-kiro-api-region`, for accounts whose stored credential region is not one Kiro serves
 - **Extended Thinking** — Enable via the `[1m]` suffix, the `thinking` field, or `output_config.effort`. Reasoning depth travels natively as `additionalModelRequestFields.output_config.effort` (validated against each model's enum; defaults to `medium` for effort-capable models when thinking is on without an explicit effort)
 - **Tool Search** — Proxy-side implementation of Anthropic's [Tool Search Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool). Supports `tool_search_tool_regex_20251119` and `tool_search_tool_bm25_20251119` with `defer_loading` for on-demand tool discovery
+- **Auto mode safeguards** — Answer Claude Code's server-side tool-use classifier with a [Jev](https://docs.typesafe.ai) judgment, so the client stops issuing its own classifier requests (which pin Claude Sonnet 5 and cost one Kiro request per reviewed action). On by default via a keyless, free provider; a `TYPESAFE_API_KEY` adds the paid endpoint as a fallback, and `-safeguard=false` turns it off (the client then uses its own classifier)
 - **Prompt Caching** — Converts Anthropic tool-level `cache_control` to Kiro `cachePoint`
 - **Truncation detection** — Automatically injects a notice into the next request when a response is truncated
 - **Retry** — Exponential backoff retry for 403 (token expiry), 429, and 5xx errors. Also retries thinking-only (empty visible) responses
@@ -99,6 +100,213 @@ claude
 
 API keys are available for Kiro Pro, Pro+, Pro Max, and Power subscribers. On group subscriptions, an administrator must enable key generation in _Settings → Kiro settings → Enable users to generate API keys_. Create keys at [app.kiro.dev](https://app.kiro.dev) → API Keys.
 
+### Auto mode safeguards (optional)
+
+In Claude Code's [auto mode](https://code.claude.com/docs/en/permission-modes) a classifier
+reviews shell commands and network calls before they run. From v2.1.278 the client asks
+whoever answers `/v1/messages` to perform that review — it sends a `safeguards` request
+field alongside the `dangerous-tool-use-…` beta — and falls back to issuing its own
+classifier requests when no `safeguard_results` comes back. Those fallback requests pin
+Claude Sonnet 5 whatever model the session runs on, and cost one Kiro request per reviewed
+action, which on a busy session is a substantial share of the credits spent.
+
+kirocc answers the field instead. Unambiguous read-only actions — `Read`, `Grep`,
+`WebFetch`, a `cat`/`ls`/`git status` shell command and the like — are cleared locally with
+no network call and no key, so the commonest actions never reach a remote judgment. Anything
+the local pass cannot vouch for is judged by [Jev](https://docs.typesafe.ai) — a small model
+that returns a calibrated verdict rather than prose. One request per reviewed action,
+typically under a second. This is **on by default and needs no key**: the default provider is
+the keyless, free OpenCode Zen endpoint. A TypeSafe key adds the paid endpoint as a fallback
+(below), and `-safeguard=false` turns the whole thing off.
+
+#### Setup
+
+Nothing to configure — with auto mode on, kirocc answers the field out of the box using the
+free provider. Point Claude Code at kirocc and leave auto mode on. Do **not** set
+`CLAUDE_CODE_AUTO_MODE_SERVER=0` — that variable tells the client not to ask, so nothing ever
+reaches kirocc. Run `/status` in a session to check: **Auto mode server** should read
+`Enabled`.
+
+**Optional — add TypeSafe as a paid fallback.** A [TypeSafe](https://typesafe.ai) key is used
+only when the free provider errors (e.g. a rate-limit). Give it to the bridge one of three
+ways (a direct key wins over the file):
+
+```bash
+export TYPESAFE_API_KEY=...            # 1. environment
+kirocc -safeguard-api-key "$KEY"       # 2. flag
+# 3. a 0600 key file the bridge reads itself (default path shown):
+printf '%s' 'ts-...' > ~/.config/kiro/typesafe-key && chmod 600 ~/.config/kiro/typesafe-key
+```
+
+Prefer the **key file** when the bridge runs as a background process: a daemon/`nohup` start
+does not source your interactive shell's rc, so a key exported only in `~/.zshrc` never reaches
+it. kirocc reads `~/.config/kiro/typesafe-key` at startup regardless of how it was launched
+(override with `-safeguard-key-file` or `KIROCC_SAFEGUARD_KEY_FILE`). The startup log confirms
+what is active:
+
+```
+INF auto mode safeguards: loaded TypeSafe key from file path=~/.config/kiro/typesafe-key
+INF auto mode safeguards enabled providers=opencode,typesafe failover=true
+```
+
+**Turning it off.** `-safeguard=false` (or `KIROCC_SAFEGUARD=false`) leaves the field
+unanswered, so Claude Code falls back to its own classifier — the behaviour before kirocc
+answered the field at all.
+
+#### Verdicts
+
+| Judgment | Answered as | Effect on the client |
+| --- | --- | --- |
+| read-only (local fast-path) | `not_flagged` | cleared with no network call, key or not |
+| cleared (Jev) | `not_flagged` | the action runs without a prompt |
+| refused (Jev) | `flagged` with an explanation | the action is blocked and the reason shown |
+| uncertain, or unavailable | `skipped` | that one action falls back to the client's own classifier |
+
+`skipped` is also what a timeout, an HTTP error or an unparseable answer becomes, and it is
+deliberately not the same as answering nothing: a wholly missing or unavailable result makes
+the client stop asking for the rest of the session, so an outage would cost the session's
+saving rather than one turn's. Because the local fast-path always answers the field for cleared
+reads, a Jev outage no longer risks that whole-session latch as long as reads are in the mix.
+
+**Why `skipped` is a distinct outcome, not a probability.** It is tempting to collapse the
+three outcomes into a single "is it dangerous?" score. They are not one axis: `not_flagged`
+and `flagged` are kirocc deciding (clear / block), while `skipped` is kirocc **abstaining** —
+handing the decision to Claude Code's own classifier. A single probability cannot express "I
+abstain, you decide," so a skip cannot be replaced by a noul without forcing every uncertain
+action into either clear (unsafe) or block (worse — with the client's fallback removed).
+Skip is also what bounds an outage to one turn rather than the session. When skips feel like
+denials, the fix is to *skip less* (clear more genuinely-safe commands via the fast-path or a
+tuned threshold), not to remove the outcome.
+
+#### Verdict cache
+
+Confident verdicts are cached in-process so a tool call already judged this session is not
+re-judged — cheaper and lower-latency on the repeats a coding session is full of (re-running a
+test, grepping across files). The cache key is what makes it safe: Jev is asked, as one extra
+question in the same request, whether its verdict depends on the command's *arguments*.
+
+- When Jev says the verdict **generalises** (a read like `grep`/`cat`, whose safety does not
+  turn on which file), the verdict is cached by command **shape** — verb, flags and pipe/redirect
+  structure, with operands abstracted — so every argument variation shares one entry. Measured
+  live, `grep foo a.go` and `grep foo b.go` collapse to a single Jev call.
+- When the verdict **depends on the arguments** (`rm`, `git push`, `curl` carrying data), it is
+  cached by the **exact input**, so a benign-args verdict is never reused for dangerous args.
+- Only `not_flagged` is ever shape-cached; `flagged` is always literal-keyed (a cached block must
+  not over-fire across a command's variations); `skipped` is never cached (it must stay
+  retryable next turn).
+
+kirocc never decides which commands are argument-dependent — Jev does. The cache key also binds
+the policy, model and thresholds, so a verdict is not reused after the session's permission
+policy changes.
+
+#### Monitoring usage
+
+Each answered response logs one line:
+
+```
+INF safeguard verdicts tool_uses=2 cleared_local=1 flagged=0 deferred=0
+```
+
+`tool_uses` is how many actions were judged, `cleared_local` how many the read-only pass
+cleared without a Jev call, `flagged` how many were refused, and `deferred` how many were
+handed back to the client. With `-log-file` these are OTel JSON Lines, so totals are a
+one-liner:
+
+```bash
+jq -s 'map(select(.body == "safeguard verdicts") | .attributes)
+       | {judged: (map(.tool_uses) | add), cleared: (map(.cleared_local) | add), flagged: (map(.flagged) | add), deferred: (map(.deferred) | add)}' \
+  ~/.cache/kirocc.jsonl
+```
+
+The saving itself shows up as an absence — no classifier requests reaching Kiro at all:
+
+```bash
+jq -r 'select(.body == "--> POST /v1/messages") | .attributes.model' ~/.cache/kirocc.jsonl |
+  sort | uniq -c
+```
+
+A session that used the client's own classifier shows a `claude-sonnet-5` line with roughly
+one request per reviewed action. Once kirocc answers the field, that line disappears and only
+the session's real turns remain.
+
+#### Debugging
+
+**No `safeguard verdicts` lines at all.** The client is not asking. Confirm Claude Code is
+v2.1.278 or later, that the session is in auto mode, and that
+`CLAUDE_CODE_AUTO_MODE_SERVER` is unset. Then check whether the field arrives, with
+`-debug` (which logs every client request body):
+
+```bash
+kirocc -debug -log-file /tmp/kirocc-debug.jsonl
+jq 'select(.attributes.request_body.safeguards) | .attributes.request_body.safeguards' \
+  /tmp/kirocc-debug.jsonl
+```
+
+**Everything comes back `deferred`.** Jev is failing. After three consecutive responses
+that fall back wholesale to the client, kirocc says so once:
+
+```
+WRN safeguard degraded: deferring every action to the client's own classifier consecutive=3 reason="classifier unavailable" err="status 401: ..."
+```
+
+`401` is a bad or missing key, `422` a malformed request, and `429`/`529` rate limiting or
+overload. A network error or a `5xx` is retried once before deferring; a `4xx` is not, since
+retrying will not help.
+
+**Why a specific action deferred or flagged.** The aggregate `safeguard verdicts` line only
+counts; the per-action reasoning is logged at DEBUG. Run the bridge with `-debug` (or
+`KIROCC_DEBUG=1`) and each judgment logs Jev's verdict:
+
+```
+DBG jev verdict tool=Bash choice=not_flagged confidence=0.95 generalizable_noul=0.67 generalizable=true outcome=not_flagged
+DBG jev verdict tool=Bash choice=flagged confidence=0.98 generalizable_noul=0.08 generalizable=false outcome=flagged explanation="judged unsafe (confidence 0.98)"
+```
+
+This shows which verdict Jev picked and at what confidence, and whether it was cached by shape
+(`generalizable=true`) or by exact input. It is the first thing to read when a command is
+gated unexpectedly. To retune the prompt without a rebuild, point `-safeguard-questions` at a
+questions JSON.
+
+**Everything is `deferred` and the client blocks routine commands.** kirocc could not reach a
+verdict, so it defers and Claude Code's fallback fails closed. With the free provider that
+usually means it is rate-limiting (a `429`) or otherwise erroring with no fallback configured;
+add a `TYPESAFE_API_KEY` so the paid endpoint backs it up (see Setup). The `safeguard degraded`
+warning in the log names the cause.
+
+**The field arrives but no verdicts follow.** Verdicts are attached per `tool_use` id, so a
+response with no tool calls answers with an empty (but still present) result. That is
+expected and shows as `tool_uses=0`.
+
+#### Reviewing and tuning verdicts
+
+To debug and improve the classification iteratively, record every Jev judgment in a
+replayable form:
+
+```bash
+kirocc -safeguard-record-file ~/.cache/kirocc-jev.jsonl   # also KIROCC_SAFEGUARD_RECORD_FILE
+```
+
+`-debug` turns this on automatically at `~/.cache/kirocc-jev.jsonl` unless you set a path, so a
+debug session always leaves replayable data. To debug without recording, set the path to
+`/dev/null`.
+
+Each real Jev call (not local fast-path clears or cache hits) appends one JSON line with the
+exact eval request (model, state, questions), the raw answers, and the resolved verdict —
+enough to re-issue the identical call later.
+
+`kirocc-jev-replay` (built from `./cmd/kirocc-jev-replay`) re-runs a recorded judgment against
+the live endpoint, and can A/B a proposed classification prompt on the *same* captured inputs:
+
+```bash
+kirocc-jev-replay -file ~/.cache/kirocc-jev.jsonl -line 12                      # replay as recorded
+kirocc-jev-replay -file ~/.cache/kirocc-jev.jsonl -line 12 -questions new.json  # try a modified prompt
+```
+
+It prints `{recorded, fresh, changed}` so you can see whether a prompt or threshold change
+would flip the verdict on a real block. The `jev-review` agent skill wraps this into a loop:
+find a surprising block, have a subagent judge whether it was sane, replay/A-B it, and append
+the labeled case to a growing calibration corpus for data-driven tuning.
+
 ### Command-line options
 
 | Flag                  | Default                   | Description                                                         |
@@ -110,6 +318,13 @@ API keys are available for Kiro Pro, Pro+, Pro Max, and Power subscribers. On gr
 | `-kiro-api-key`       | (none)                    | Kiro API key (`ksk_…`) to use instead of the Kiro CLI DB credential |
 | `-kiro-api-region`    | (credential's region)     | Region for Kiro API endpoints (`runtime.<region>.kiro.dev`)         |
 | `-model-discovery`    | `true`                    | Fetch Kiro's model catalog at startup                               |
+| `-safeguard`          | `true`                    | Answer auto mode's safeguards field (keyless/free); `=false` uses the client's own classifier |
+| `-safeguard-api-key`  | (none)                    | TypeSafe API key; adds the paid endpoint as a fallback behind the free provider |
+| `-safeguard-key-file` | `~/.config/kiro/typesafe-key` | File to read the TypeSafe key from when the key/env is unset     |
+| `-safeguard-record-file` | (none)                 | Append a replayable JSON-lines record of each Jev judgment (for `kirocc-jev-replay`) |
+| `-safeguard-endpoint` | TypeSafe default          | Override the TypeSafe endpoint                                      |
+| `-safeguard-model`    | `jev-latest`              | Override the TypeSafe model id                                      |
+| `-safeguard-questions` | (built-in prompt)        | Path to a questions JSON that overrides the default classification prompt |
 | `-keepalive-interval` | `15s`                     | SSE idle keep-alive interval (0 = disabled)                         |
 | `-debug`              | `false`                   | Enable debug logging                                                |
 | `-log-file`           | (none)                    | Write logs to file with rotation (file-only by default)             |
@@ -142,6 +357,13 @@ Command-line options can be overridden with environment variables.
 | `KIRO_API_KEY`              | `-kiro-api-key`       |
 | `KIRO_API_REGION`           | `-kiro-api-region`    |
 | `KIROCC_MODEL_DISCOVERY`    | `-model-discovery`    |
+| `KIROCC_SAFEGUARD`          | `-safeguard`          |
+| `TYPESAFE_API_KEY`          | `-safeguard-api-key`  |
+| `KIROCC_SAFEGUARD_KEY_FILE`  | `-safeguard-key-file` |
+| `KIROCC_SAFEGUARD_RECORD_FILE` | `-safeguard-record-file` |
+| `KIROCC_SAFEGUARD_ENDPOINT` | `-safeguard-endpoint` |
+| `KIROCC_SAFEGUARD_MODEL`    | `-safeguard-model`    |
+| `KIROCC_SAFEGUARD_QUESTIONS` | `-safeguard-questions` |
 | `KIROCC_KEEPALIVE_INTERVAL` | `-keepalive-interval` |
 | `KIROCC_DEBUG`              | `-debug`              |
 | `KIROCC_LOG_FILE`           | `-log-file`           |

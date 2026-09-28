@@ -92,3 +92,15 @@ func TestParseFlags_KeepAliveInterval(t *testing.T) {
 		}
 	})
 }
+
+func TestNewSafeguardClient_Toggle(t *testing.T) {
+	// Disabled: no client, so the field is left unanswered and the client uses
+	// its own classifier.
+	if c := newSafeguardClient(config.Config{Safeguard: false}); c != nil {
+		t.Error("newSafeguardClient(Safeguard:false) = non-nil; want nil")
+	}
+	// Enabled with no key: still usable, backed by the keyless free provider.
+	if c := newSafeguardClient(config.Config{Safeguard: true, SafeguardFailover: true}); c == nil {
+		t.Error("newSafeguardClient(Safeguard:true) = nil; want a keyless client")
+	}
+}

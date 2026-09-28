@@ -7,6 +7,7 @@ import (
 	messagesapp "github.com/d-kuro/kirocc/internal/app/messages"
 	"github.com/d-kuro/kirocc/internal/config"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
+	"github.com/d-kuro/kirocc/internal/safeguard"
 	"github.com/d-kuro/kirocc/internal/tracing"
 )
 
@@ -37,6 +38,12 @@ func WithMaxRequestBody(limit int64) ServerOption {
 	return func(s *Server) { s.maxRequestBody = limit }
 }
 
+// WithSafeguard supplies the classifier that answers auto mode's `safeguards`
+// request field. Nil leaves the field unanswered.
+func WithSafeguard(c *safeguard.Client) ServerOption {
+	return func(s *Server) { s.safeguard = c }
+}
+
 // Server is the HTTP server for the kirocc proxy.
 type Server struct {
 	apiKey            string
@@ -45,6 +52,7 @@ type Server struct {
 	captureEnabled    bool
 	keepAliveInterval time.Duration
 	maxRequestBody    int64
+	safeguard         *safeguard.Client
 	mux               *http.ServeMux
 	messages          *messagesapp.Service
 }
@@ -63,6 +71,7 @@ func New(authMgr messagesapp.TokenGetter, apiKey string, client kiroclient.Clien
 		messagesapp.WithCapture(s.captureEnabled),
 		messagesapp.WithKeepAliveInterval(s.keepAliveInterval),
 		messagesapp.WithMaxRequestBody(s.maxRequestBody),
+		messagesapp.WithSafeguard(s.safeguard),
 	)
 	s.registerRoutes()
 	return s
