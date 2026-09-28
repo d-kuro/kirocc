@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"io"
 	"net/http"
-	"strings"
-	"unicode/utf8"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/trace"
@@ -79,13 +77,4 @@ func (b *bodyCaptureReader) Close() error {
 // captured returns the captured body, whether it was truncated, and total bytes read.
 func (b *bodyCaptureReader) captured() (body []byte, truncated bool, totalSize int) {
 	return b.buf.Bytes(), b.limit > 0 && b.total > b.limit, b.total
-}
-
-// toValidUTF8 returns the byte slice as a valid UTF-8 string,
-// replacing invalid sequences with the Unicode replacement character.
-func toValidUTF8(b []byte) string {
-	if utf8.Valid(b) {
-		return string(b)
-	}
-	return strings.ToValidUTF8(string(b), "\uFFFD")
 }
