@@ -165,11 +165,25 @@ func TestResolve(t *testing.T) {
 			wantAnthropicModel: "claude-fable-5-1[1m]",
 		},
 		{
+			name:               "claude-opus-5-5 always resolves to 1m without thinking",
+			model:              "claude-opus-5-5",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
 			name:               "claude-fable-5-1[1m] exact-match preserves suffix without thinking",
 			model:              "claude-fable-5-1[1m]",
 			wantKiroModel:      "claude-fable-5.1",
 			wantContextWindow:  ThinkingContextWindowSize,
 			wantAnthropicModel: "claude-fable-5-1[1m]",
+		},
+		{
+			name:               "claude-opus-5-5[1m] exact-match preserves suffix without thinking",
+			model:              "claude-opus-5-5[1m]",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
 		},
 		{
 			name:               "claude-fable-5-1 with context1M keeps thinking off",
@@ -180,11 +194,26 @@ func TestResolve(t *testing.T) {
 			wantAnthropicModel: "claude-fable-5-1[1m]",
 		},
 		{
+			name:               "claude-opus-5-5 with context1M keeps thinking off",
+			model:              "claude-opus-5-5",
+			context1M:          true,
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
 			name:               "kiro dotted claude-fable-5.1 resolves to hyphen anthropic form",
 			model:              "claude-fable-5.1",
 			wantKiroModel:      "claude-fable-5.1",
 			wantContextWindow:  ThinkingContextWindowSize,
 			wantAnthropicModel: "claude-fable-5-1[1m]",
+		},
+		{
+			name:               "kiro dotted claude-opus-5.5 resolves to hyphen anthropic form",
+			model:              "claude-opus-5.5",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
 		},
 		{
 			name:               "claude-sonnet-4-6",
@@ -451,6 +480,10 @@ func TestListModels(t *testing.T) {
 			checkModel: "claude-fable-5.1",
 		},
 		{
+			name:       "claude-opus-5.5 is listed exactly once (both alias rows dedupe to one Kiro value)",
+			checkModel: "claude-opus-5.5",
+		},
+		{
 			name:       "canonical GPT ID is listed",
 			checkModel: "gpt-5.6-sol",
 		},
@@ -524,6 +557,7 @@ func TestListModels_DisplayNames(t *testing.T) {
 		{id: "claude-opus-4-6[1m]", want: "Opus 4.6 (1M context)"},
 		{id: "claude-sonnet-5[1m]", want: "Sonnet 5 (1M context)"},
 		{id: "claude-fable-5-1[1m]", want: "Fable 5.1 (1M context)"},
+		{id: "claude-opus-5-5[1m]", want: "Opus 5.5 (1M context)"},
 		// Separate 1M SKU: both windows are pickable.
 		{id: "claude-sonnet-4-6", want: "Sonnet 4.6"},
 		{id: "claude-sonnet-4-6[1m]", want: "Sonnet 4.6 (1M context)"},
