@@ -635,16 +635,16 @@ func (o *serverToolOrchestrator) executeWebSearch(ctx context.Context, short str
 }
 
 // appendWebSearchMessages appends the server_tool_use + tool_result messages to
-// the conversation. The result text is rendered by reqconv.ServerToolResultText,
-// the same function that renders this round when a client replays it from
-// history, so the executor sees identical text either way.
+// the conversation.
 func (o *serverToolOrchestrator) appendWebSearchMessages(msgs []anthropic.Message, srvToolUseID string, searchInput map[string]any, outcome webSearchOutcome, redacted []string) []anthropic.Message {
 	isError := outcome.errorCode != ""
 	// The text fed back to the executor for the next round. On success it
 	// carries each result's snippet (websearch.LiveResultText) — the excerpt is
 	// why results are looped back at all; a title-and-URL list would make the
-	// model answer blind. Errors reuse the shared renderer so live and replayed
-	// failures read identically.
+	// model answer blind. A round replayed from client history renders title and
+	// URL only (reqconv.ServerToolResultText), so the two paths differ on success.
+	// Errors reuse the shared renderer so live and replayed failures read
+	// identically.
 	var resultText string
 	if isError {
 		resultText = reqconv.ServerToolResultText(anthropic.ContentBlock{

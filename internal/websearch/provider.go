@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 // Provider identifiers accepted by Config.Provider.
@@ -352,11 +351,23 @@ func appendResult(out []Result, title, rawURL, snippet, age string) []Result {
 const maxSnippetLen = 500
 
 func collapseSpace(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if utf8.RuneCountInString(s) > maxSnippetLen {
-		// Truncate on a rune boundary: slicing raw bytes can split a multi-byte
-		// character and emit invalid UTF-8.
-		s = strings.TrimSpace(string([]rune(s)[:maxSnippetLen])) + "…"
+	return truncateRunes(strings.Join(strings.Fields(s), " "), maxSnippetLen)
+}
+
+// truncateRunes cuts s to at most n runes, marking a cut with an ellipsis. It
+// cuts on a rune boundary: slicing raw bytes can split a multi-byte character
+// and emit invalid UTF-8. It stops scanning at the cut rather than converting
+// all of s to runes.
+func truncateRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	runes := 0
+	for i := range s {
+		if runes == n {
+			return strings.TrimSpace(s[:i]) + "…"
+		}
+		runes++
 	}
 	return s
 }
@@ -370,13 +381,14 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+// maxErrorLineLen bounds how much of a provider's error body reaches the error
+// message, in runes.
+const maxErrorLineLen = 200
+
 func firstLine(body []byte) string {
 	s := strings.TrimSpace(string(body))
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i]
 	}
-	if len(s) > 200 {
-		s = s[:200] + "…"
-	}
-	return s
+	return truncateRunes(s, maxErrorLineLen)
 }
