@@ -22,6 +22,7 @@ func Normalize(msgs []anthropic.Message, hasTools bool) []anthropic.Message {
 	msgs = textualizeToolContent(msgs, hasTools)
 	msgs = normalizeRoles(msgs)
 	msgs = mergeAdjacentSameRole(msgs)
+	msgs = mergeAdjacentUserBlocks(msgs)
 	msgs = ensureStartsWithUser(msgs)
 	msgs = ensureAlternatingRoles(msgs)
 	return msgs
@@ -164,6 +165,41 @@ func mergeAdjacentSameRole(msgs []anthropic.Message) []anthropic.Message {
 		i = j
 	}
 	return result
+}
+
+// mergeAdjacentUserBlocks folds consecutive user messages that
+// mergeAdjacentSameRole left apart (at least one has structured content, e.g. a
+// tool_result turn followed by hook feedback or a queued prompt) into one
+// block-content message. Without this, ensureAlternatingRoles would insert a
+// synthetic "(empty)" assistant turn between them, and the model then sees its
+// own past turns as empty and starts producing empty replies.
+func mergeAdjacentUserBlocks(msgs []anthropic.Message) []anthropic.Message {
+	if len(msgs) <= 1 {
+		return msgs
+	}
+	result := make([]anthropic.Message, 0, len(msgs))
+	for _, msg := range msgs {
+		n := len(result)
+		if n == 0 || msg.Role != "user" || result[n-1].Role != "user" {
+			result = append(result, msg)
+			continue
+		}
+		blocks := append(asBlocks(result[n-1].Content), asBlocks(msg.Content)...)
+		result[n-1] = anthropic.Message{Role: "user", Content: anthropic.MessageContent{Blocks: blocks}}
+	}
+	return result
+}
+
+// asBlocks returns content as a fresh block slice, wrapping a plain string in a
+// text block.
+func asBlocks(content anthropic.MessageContent) []anthropic.ContentBlock {
+	if content.IsString() {
+		if content.Text == "" {
+			return nil
+		}
+		return []anthropic.ContentBlock{{Type: anthropic.BlockTypeText, Text: content.Text}}
+	}
+	return append([]anthropic.ContentBlock(nil), content.Blocks...)
 }
 
 // isPlainTextContent reports whether content is a plain string or only text blocks.
