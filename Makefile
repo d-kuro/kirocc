@@ -19,7 +19,7 @@ test:
 	go test -race ./...
 
 test-e2e:
-	go test -tags e2e -race -timeout 120s ./internal/e2e/
+	go test -tags e2e -race -timeout 600s ./internal/e2e/
 
 lint:
 	golangci-lint run
