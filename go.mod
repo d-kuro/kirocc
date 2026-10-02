@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/lmittmann/tint v1.2.0
+	github.com/lmittmann/tint v1.2.1
 	github.com/pkoukk/tiktoken-go v0.1.8
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0
 	go.opentelemetry.io/otel v1.46.0
