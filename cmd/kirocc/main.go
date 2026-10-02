@@ -145,7 +145,7 @@ func parseFlags(args []string) (config.Config, error) {
 	fs.IntVar(&cfg.OTelBodyLimit, "otel-body-limit", config.DefaultOTelBodyLimit, "max bytes of request body to capture in OTel spans (0 = unlimited)")
 	fs.Int64Var(&cfg.MaxRequestBody, "max-request-body", config.DefaultMaxRequestBody, "max bytes of a client request body (0 = unlimited); also KIROCC_MAX_REQUEST_BODY")
 	fs.DurationVar(&cfg.KeepAliveInterval, "keepalive-interval", config.DefaultKeepAliveInterval, "SSE idle keep-alive interval (0 = disabled)")
-	fs.DurationVar(&cfg.ResponseHeaderTimeout, "response-header-timeout", config.DefaultResponseHeaderTimeout, "max wait for Kiro response headers (0 = no limit); also KIROCC_RESPONSE_HEADER_TIMEOUT")
+	fs.DurationVar(&cfg.ResponseHeaderTimeout, "response-header-timeout", kiroclient.DefaultResponseHeaderTimeout, "max wait for Kiro response headers (0 = no limit); also KIROCC_RESPONSE_HEADER_TIMEOUT")
 	fs.StringVar(&cfg.LogFile.Path, "log-file", "", "write logs to file with rotation (for agent debugging)")
 	fs.IntVar(&cfg.LogFile.MaxSize, "log-max-size", logging.DefaultLogMaxSize, "max log file size in MB before rotation")
 	fs.IntVar(&cfg.LogFile.MaxBackups, "log-max-backups", logging.DefaultLogMaxBackups, "max number of old log files to retain")

@@ -67,7 +67,8 @@ var ErrBodyReadIdle = errors.New("kiroclient: body read idle timeout")
 
 const defaultBodyReadIdleTimeout = 180 * time.Second
 
-const defaultResponseHeaderTimeout = 30 * time.Second
+// DefaultResponseHeaderTimeout is the default wait for Kiro's response headers.
+const DefaultResponseHeaderTimeout = 30 * time.Second
 
 // HTTPClient is the production implementation of Client.
 type HTTPClient struct {
@@ -80,7 +81,7 @@ type HTTPClient struct {
 	countTokens    func([]byte) (int, error) // nil = skip token counting
 	bodyReadIdle   time.Duration             // idle timeout for response body reads; 0 = use default
 	apiKeyAuth     bool                      // send TokenType: API_KEY with the bearer
-	headerTimeout  *time.Duration            // nil = defaultResponseHeaderTimeout; 0 = no limit
+	headerTimeout  time.Duration             // wait for response headers; 0 = no limit
 }
 
 // HTTPClientOption configures an HTTPClient.
@@ -138,7 +139,7 @@ func WithBodyReadIdleTimeout(d time.Duration) HTTPClientOption {
 // WithResponseHeaderTimeout sets how long to wait for response headers after
 // the request is written. 0 disables the limit.
 func WithResponseHeaderTimeout(d time.Duration) HTTPClientOption {
-	return func(c *HTTPClient) { c.headerTimeout = &d }
+	return func(c *HTTPClient) { c.headerTimeout = d }
 }
 
 // WithOTel enables OpenTelemetry tracing on outgoing requests.
@@ -156,14 +157,11 @@ func NewHTTPClient(opts ...HTTPClientOption) *HTTPClient {
 	transport.MaxIdleConnsPerHost = 10
 	transport.IdleConnTimeout = 90 * time.Second
 
-	c := &HTTPClient{}
+	c := &HTTPClient{headerTimeout: DefaultResponseHeaderTimeout}
 	for _, opt := range opts {
 		opt(c)
 	}
-	transport.ResponseHeaderTimeout = defaultResponseHeaderTimeout
-	if c.headerTimeout != nil {
-		transport.ResponseHeaderTimeout = *c.headerTimeout
-	}
+	transport.ResponseHeaderTimeout = c.headerTimeout
 
 	var rt http.RoundTripper = transport
 	if c.otel {

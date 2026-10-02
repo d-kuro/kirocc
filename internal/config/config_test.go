@@ -282,6 +282,44 @@ func TestApplyEnvOverrides_MaxRequestBody(t *testing.T) {
 	}
 }
 
+func TestApplyEnvOverrides_ResponseHeaderTimeout(t *testing.T) {
+	tests := []struct {
+		name         string
+		value        string
+		want         time.Duration
+		wantApplyErr bool
+		wantValidErr bool
+	}{
+		{name: "duration", value: "90s", want: 90 * time.Second},
+		{name: "no limit", value: "0", want: 0},
+		{name: "unset keeps flag default", value: "", want: 30 * time.Second},
+		{name: "negative", value: "-1s", want: -time.Second, wantValidErr: true},
+		{name: "invalid", value: "not-a-duration", wantApplyErr: true},
+		{name: "too small", value: "90ms", want: 90 * time.Millisecond, wantValidErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KIROCC_RESPONSE_HEADER_TIMEOUT", tt.value)
+			cfg := Config{Host: "127.0.0.1", Port: 3456, ResponseHeaderTimeout: 30 * time.Second}
+
+			err := ApplyEnvOverrides(&cfg)
+			if (err != nil) != tt.wantApplyErr {
+				t.Fatalf("ApplyEnvOverrides() err = %v, wantApplyErr = %v", err, tt.wantApplyErr)
+			}
+			if tt.wantApplyErr {
+				return
+			}
+			if cfg.ResponseHeaderTimeout != tt.want {
+				t.Fatalf("ResponseHeaderTimeout = %v, want %v", cfg.ResponseHeaderTimeout, tt.want)
+			}
+			if err := cfg.Validate(); (err != nil) != tt.wantValidErr {
+				t.Fatalf("Validate() err = %v, wantValidErr = %v", err, tt.wantValidErr)
+			}
+		})
+	}
+}
+
 func TestConfig_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -301,6 +339,10 @@ func TestConfig_Validate(t *testing.T) {
 		{"keep-alive minimum", Config{Host: "127.0.0.1", Port: 3456, KeepAliveInterval: time.Second}, false},
 		{"keep-alive negative", Config{Host: "127.0.0.1", Port: 3456, KeepAliveInterval: -time.Second}, true},
 		{"keep-alive too small", Config{Host: "127.0.0.1", Port: 3456, KeepAliveInterval: 500 * time.Millisecond}, true},
+		{"header timeout no limit", Config{Host: "127.0.0.1", Port: 3456, ResponseHeaderTimeout: 0}, false},
+		{"header timeout minimum", Config{Host: "127.0.0.1", Port: 3456, ResponseHeaderTimeout: time.Second}, false},
+		{"header timeout negative", Config{Host: "127.0.0.1", Port: 3456, ResponseHeaderTimeout: -time.Second}, true},
+		{"header timeout too small", Config{Host: "127.0.0.1", Port: 3456, ResponseHeaderTimeout: 500 * time.Millisecond}, true},
 		{"region unset", Config{Host: "127.0.0.1", Port: 3456}, false},
 		{"region us-east-1", Config{Host: "127.0.0.1", Port: 3456, KiroAPIRegion: "us-east-1"}, false},
 		{"region us-gov-west-1", Config{Host: "127.0.0.1", Port: 3456, KiroAPIRegion: "us-gov-west-1"}, false},

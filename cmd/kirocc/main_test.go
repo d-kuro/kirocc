@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/d-kuro/kirocc/internal/config"
+	"github.com/d-kuro/kirocc/internal/kiroclient"
 )
 
 func TestRun_HelpFlagReturnsNoError(t *testing.T) {
@@ -67,6 +68,28 @@ func TestParseFlags_ModelDiscovery(t *testing.T) {
 		}
 		if cfg.ModelDiscovery {
 			t.Fatal("ModelDiscovery = true, want false")
+		}
+	})
+}
+
+func TestParseFlags_ResponseHeaderTimeout(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		cfg, err := parseFlags(nil)
+		if err != nil {
+			t.Fatalf("parseFlags: %v", err)
+		}
+		if cfg.ResponseHeaderTimeout != kiroclient.DefaultResponseHeaderTimeout {
+			t.Fatalf("ResponseHeaderTimeout = %v, want %v", cfg.ResponseHeaderTimeout, kiroclient.DefaultResponseHeaderTimeout)
+		}
+	})
+
+	t.Run("flag", func(t *testing.T) {
+		cfg, err := parseFlags([]string{"-response-header-timeout", "90s"})
+		if err != nil {
+			t.Fatalf("parseFlags: %v", err)
+		}
+		if cfg.ResponseHeaderTimeout != 90*time.Second {
+			t.Fatalf("ResponseHeaderTimeout = %v, want 90s", cfg.ResponseHeaderTimeout)
 		}
 	})
 }
