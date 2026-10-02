@@ -22,8 +22,6 @@ const (
 	DefaultMaxRequestBody = 32 << 20
 	// DefaultKeepAliveInterval is the default idle time between SSE keep-alive comments.
 	DefaultKeepAliveInterval = 15 * time.Second
-	// DefaultResponseHeaderTimeout bounds the wait for Kiro's response headers.
-	DefaultResponseHeaderTimeout = 30 * time.Second
 )
 
 // Config is the runtime configuration for kirocc.
@@ -185,8 +183,8 @@ func (c *Config) Validate() error {
 	if c.KeepAliveInterval != 0 && c.KeepAliveInterval < time.Second {
 		return fmt.Errorf("keepalive-interval must be 0 or >= 1s, got %s", c.KeepAliveInterval)
 	}
-	if c.ResponseHeaderTimeout < 0 {
-		return fmt.Errorf("response-header-timeout must be >= 0, got %s", c.ResponseHeaderTimeout)
+	if c.ResponseHeaderTimeout != 0 && c.ResponseHeaderTimeout < time.Second {
+		return fmt.Errorf("response-header-timeout must be 0 or >= 1s, got %s", c.ResponseHeaderTimeout)
 	}
 	if c.KiroAPIRegion != "" {
 		if len(c.KiroAPIRegion) > maxRegionLen || !regionPattern.MatchString(c.KiroAPIRegion) {

@@ -236,7 +236,7 @@ func TestExtractToolResultContentText_ToolSearchResult(t *testing.T) {
 	}
 }
 
-func TestStep2_DoesNotMergeStructuredContent(t *testing.T) {
+func TestStep2_MergesStructuredUserContent(t *testing.T) {
 	msgs := []anthropic.Message{
 		{Role: "user", Content: anthropic.MessageContent{Text: "Hello"}},
 		{
@@ -249,7 +249,31 @@ func TestStep2_DoesNotMergeStructuredContent(t *testing.T) {
 		},
 	}
 	got := mergeAdjacentSameRole(msgs)
+	if len(got) != 1 {
+		t.Fatalf("got %d messages, want 1", len(got))
+	}
+	if toolResults, _ := scanMessageContent(got[0].Content); len(toolResults) != 1 {
+		t.Fatalf("tool_result lost: %+v", got[0])
+	}
+	if text := ExtractTextContent(got[0].Content); text != "Hello" {
+		t.Fatalf("text = %q, want %q", text, "Hello")
+	}
+}
+
+func TestStep2_DoesNotMergeStructuredAssistantContent(t *testing.T) {
+	msgs := []anthropic.Message{
+		{Role: "assistant", Content: anthropic.MessageContent{Text: "Hello"}},
+		{
+			Role: "assistant",
+			Content: anthropic.MessageContent{
+				Blocks: []anthropic.ContentBlock{
+					{Type: "tool_use", ID: "t1", Name: "Bash", Input: map[string]any{"command": "ls"}},
+				},
+			},
+		},
+	}
+	got := mergeAdjacentSameRole(msgs)
 	if len(got) != 2 {
-		t.Fatalf("should not merge structured content, got %d", len(got))
+		t.Fatalf("should not merge structured assistant content, got %d", len(got))
 	}
 }

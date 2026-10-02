@@ -16,11 +16,10 @@ func ExtractTextContent(content anthropic.MessageContent) string {
 	}
 	var parts []string
 	for _, b := range content.Blocks {
-		switch b.Type {
-		case anthropic.BlockTypeText:
+		switch {
+		case b.Type == anthropic.BlockTypeText:
 			parts = append(parts, b.Text)
-		case anthropic.BlockTypeThinking, anthropic.BlockTypeRedactedThinking, anthropic.BlockTypeToolUse, anthropic.BlockTypeToolResult, anthropic.BlockTypeImage, anthropic.BlockTypeToolReference,
-			anthropic.BlockTypeServerToolUse, anthropic.BlockTypeToolSearchToolResult:
+		case handledSeparately(b.Type):
 			// Skip — handled separately.
 		default:
 			// Unknown block type → textualize.
@@ -28,6 +27,18 @@ func ExtractTextContent(content anthropic.MessageContent) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// handledSeparately reports whether a block type stays out of the message text:
+// tool use/results and images are carried in their own fields, thinking is
+// dropped.
+func handledSeparately(blockType string) bool {
+	switch blockType {
+	case anthropic.BlockTypeThinking, anthropic.BlockTypeRedactedThinking, anthropic.BlockTypeToolUse, anthropic.BlockTypeToolResult, anthropic.BlockTypeImage, anthropic.BlockTypeToolReference,
+		anthropic.BlockTypeServerToolUse, anthropic.BlockTypeToolSearchToolResult:
+		return true
+	}
+	return false
 }
 
 // textualizeUnknownBlock converts an unknown content block to a text representation.

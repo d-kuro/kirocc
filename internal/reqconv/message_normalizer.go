@@ -22,7 +22,6 @@ func Normalize(msgs []anthropic.Message, hasTools bool) []anthropic.Message {
 	msgs = textualizeToolContent(msgs, hasTools)
 	msgs = normalizeRoles(msgs)
 	msgs = mergeAdjacentSameRole(msgs)
-	msgs = mergeAdjacentUserBlocks(msgs)
 	msgs = ensureStartsWithUser(msgs)
 	msgs = ensureAlternatingRoles(msgs)
 	return msgs
@@ -129,9 +128,13 @@ func extractToolResultContentText(b anthropic.ContentBlock) string {
 	return strings.Join(parts, "\n")
 }
 
-// mergeAdjacentSameRole merges runs of consecutive same-role plain-text messages
-// into a single message. Each run is joined with "\n" using one strings.Builder,
-// so the cost is O(total characters) rather than O(n²) from repeated concatenation.
+// mergeAdjacentSameRole merges runs of consecutive same-role messages into a
+// single message: any run of user messages, and runs of plain-text assistant
+// messages. Claude Code often sends a tool_result turn followed by a user text
+// turn (hook feedback, reminders, a queued prompt); leaving them apart would
+// make ensureAlternatingRoles insert a synthetic "(empty)" assistant turn, and
+// the model then sees its own past turns as empty and starts producing empty
+// replies.
 func mergeAdjacentSameRole(msgs []anthropic.Message) []anthropic.Message {
 	if len(msgs) == 0 {
 		return msgs
@@ -141,65 +144,52 @@ func mergeAdjacentSameRole(msgs []anthropic.Message) []anthropic.Message {
 	for i < len(msgs) {
 		// Find the end of a mergeable run starting at i.
 		j := i + 1
-		if isPlainTextContent(msgs[i].Content) {
-			for j < len(msgs) && msgs[j].Role == msgs[i].Role && isPlainTextContent(msgs[j].Content) {
-				j++
-			}
+		for j < len(msgs) && mergeable(msgs[i], msgs[j]) {
+			j++
 		}
 		if j == i+1 {
 			result = append(result, msgs[i])
-			i = j
-			continue
+		} else {
+			result = append(result, mergeRun(msgs[i:j]))
 		}
-		var b strings.Builder
-		for k := i; k < j; k++ {
-			if k > i {
-				b.WriteByte('\n')
-			}
-			b.WriteString(ExtractTextContent(msgs[k].Content))
-		}
-		result = append(result, anthropic.Message{
-			Role:    msgs[i].Role,
-			Content: anthropic.MessageContent{Text: b.String()},
-		})
 		i = j
 	}
 	return result
 }
 
-// mergeAdjacentUserBlocks folds consecutive user messages that
-// mergeAdjacentSameRole left apart (at least one has structured content, e.g. a
-// tool_result turn followed by hook feedback or a queued prompt) into one
-// block-content message. Without this, ensureAlternatingRoles would insert a
-// synthetic "(empty)" assistant turn between them, and the model then sees its
-// own past turns as empty and starts producing empty replies.
-func mergeAdjacentUserBlocks(msgs []anthropic.Message) []anthropic.Message {
-	if len(msgs) <= 1 {
-		return msgs
+// mergeable reports whether next can join the run that starts with first.
+func mergeable(first, next anthropic.Message) bool {
+	if next.Role != first.Role {
+		return false
 	}
-	result := make([]anthropic.Message, 0, len(msgs))
-	for _, msg := range msgs {
-		n := len(result)
-		if n == 0 || msg.Role != "user" || result[n-1].Role != "user" {
-			result = append(result, msg)
-			continue
-		}
-		blocks := append(asBlocks(result[n-1].Content), asBlocks(msg.Content)...)
-		result[n-1] = anthropic.Message{Role: "user", Content: anthropic.MessageContent{Blocks: blocks}}
-	}
-	return result
+	return first.Role == "user" || isPlainTextContent(first.Content) && isPlainTextContent(next.Content)
 }
 
-// asBlocks returns content as a fresh block slice, wrapping a plain string in a
-// text block.
-func asBlocks(content anthropic.MessageContent) []anthropic.ContentBlock {
-	if content.IsString() {
-		if content.Text == "" {
-			return nil
+// mergeRun merges a run of same-role messages into one. Kiro reads a turn's
+// text and its tool results/images from separate fields, so the structured
+// blocks keep their order and the turns' texts are joined with "\n" into one
+// trailing text block, or into string content when there are no such blocks.
+func mergeRun(run []anthropic.Message) anthropic.Message {
+	var blocks []anthropic.ContentBlock
+	var texts []string
+	for _, msg := range run {
+		if text := ExtractTextContent(msg.Content); text != "" {
+			texts = append(texts, text)
 		}
-		return []anthropic.ContentBlock{{Type: anthropic.BlockTypeText, Text: content.Text}}
+		for _, b := range msg.Content.Blocks {
+			if handledSeparately(b.Type) {
+				blocks = append(blocks, b)
+			}
+		}
 	}
-	return append([]anthropic.ContentBlock(nil), content.Blocks...)
+	text := strings.Join(texts, "\n")
+	if len(blocks) == 0 {
+		return anthropic.Message{Role: run[0].Role, Content: anthropic.MessageContent{Text: text}}
+	}
+	if text != "" {
+		blocks = append(blocks, anthropic.ContentBlock{Type: anthropic.BlockTypeText, Text: text})
+	}
+	return anthropic.Message{Role: run[0].Role, Content: anthropic.MessageContent{Blocks: blocks}}
 }
 
 // isPlainTextContent reports whether content is a plain string or only text blocks.

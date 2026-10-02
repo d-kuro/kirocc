@@ -102,29 +102,30 @@ API keys are available for Kiro Pro, Pro+, Pro Max, and Power subscribers. On gr
 
 ### Command-line options
 
-| Flag                  | Default                   | Description                                                         |
-| --------------------- | ------------------------- | ------------------------------------------------------------------- |
-| `-port`               | `3456`                    | Listen port                                                         |
-| `-host`               | `127.0.0.1`               | Bind host                                                           |
-| `-db`                 | (OS-dependent, see below) | Kiro CLI SQLite DB path                                             |
-| `-api-key`            | (none)                    | API key required to access the proxy                                |
-| `-kiro-api-key`       | (none)                    | Kiro API key (`ksk_…`) to use instead of the Kiro CLI DB credential |
-| `-kiro-api-region`    | (credential's region)     | Region for Kiro API endpoints (`runtime.<region>.kiro.dev`)         |
-| `-model-discovery`    | `true`                    | Fetch Kiro's model catalog at startup                               |
-| `-keepalive-interval` | `15s`                     | SSE idle keep-alive interval (0 = disabled)                         |
-| `-web-search-provider` | (none) | Run `web_search_20250305` proxy-side via `brave`, `tavily`, `exa` or `custom`; empty disables it |
-| `-web-search-api-key` | (none) | API key for the search provider |
-| `-web-search-url` | (none) | Endpoint for `-web-search-provider custom` |
-| `-web-search-max-results` | `5` | Results per search |
-| `-debug`              | `false`                   | Enable debug logging                                                |
-| `-log-file`           | (none)                    | Write logs to file with rotation (file-only by default)             |
-| `-log-max-size`       | `10`                      | Max log file size in MB before rotation                             |
-| `-log-max-backups`    | `5`                       | Max number of old log files to retain                               |
-| `-log-max-age`        | `7`                       | Max days to retain old log files                                    |
-| `-log-compress`       | `false`                   | Compress rotated log files with gzip                                |
-| `-log-console`        | `false`                   | Also write logs to console when `-log-file` is set                  |
-| `-otel`               | `false`                   | Enable OpenTelemetry tracing (OTLP HTTP exporter)                   |
-| `-otel-body-limit`    | `32768`                   | Max bytes of request body to capture in OTel spans (0 = unlimited)  |
+| Flag                       | Default                   | Description                                                                                      |
+| -------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------ |
+| `-port`                    | `3456`                    | Listen port                                                                                      |
+| `-host`                    | `127.0.0.1`               | Bind host                                                                                        |
+| `-db`                      | (OS-dependent, see below) | Kiro CLI SQLite DB path                                                                          |
+| `-api-key`                 | (none)                    | API key required to access the proxy                                                             |
+| `-kiro-api-key`            | (none)                    | Kiro API key (`ksk_…`) to use instead of the Kiro CLI DB credential                              |
+| `-kiro-api-region`         | (credential's region)     | Region for Kiro API endpoints (`runtime.<region>.kiro.dev`)                                      |
+| `-model-discovery`         | `true`                    | Fetch Kiro's model catalog at startup                                                            |
+| `-keepalive-interval`      | `15s`                     | SSE idle keep-alive interval (0 = disabled)                                                      |
+| `-response-header-timeout` | `30s`                     | Max wait for Kiro response headers (0 = no limit, otherwise >= 1s)                               |
+| `-web-search-provider`     | (none)                    | Run `web_search_20250305` proxy-side via `brave`, `tavily`, `exa` or `custom`; empty disables it |
+| `-web-search-api-key`      | (none)                    | API key for the search provider                                                                  |
+| `-web-search-url`          | (none)                    | Endpoint for `-web-search-provider custom`                                                       |
+| `-web-search-max-results`  | `5`                       | Results per search                                                                               |
+| `-debug`                   | `false`                   | Enable debug logging                                                                             |
+| `-log-file`                | (none)                    | Write logs to file with rotation (file-only by default)                                          |
+| `-log-max-size`            | `10`                      | Max log file size in MB before rotation                                                          |
+| `-log-max-backups`         | `5`                       | Max number of old log files to retain                                                            |
+| `-log-max-age`             | `7`                       | Max days to retain old log files                                                                 |
+| `-log-compress`            | `false`                   | Compress rotated log files with gzip                                                             |
+| `-log-console`             | `false`                   | Also write logs to console when `-log-file` is set                                               |
+| `-otel`                    | `false`                   | Enable OpenTelemetry tracing (OTLP HTTP exporter)                                                |
+| `-otel-body-limit`         | `32768`                   | Max bytes of request body to capture in OTel spans (0 = unlimited)                               |
 
 #### Default DB path
 
@@ -138,29 +139,30 @@ API keys are available for Kiro Pro, Pro+, Pro Max, and Power subscribers. On gr
 
 Command-line options can be overridden with environment variables.
 
-| Variable                    | Corresponding option  |
-| --------------------------- | --------------------- |
-| `KIROCC_PORT`               | `-port`               |
-| `KIROCC_HOST`               | `-host`               |
-| `KIROCC_DB_PATH`            | `-db`                 |
-| `KIROCC_API_KEY`            | `-api-key`            |
-| `KIRO_API_KEY`              | `-kiro-api-key`       |
-| `KIRO_API_REGION`           | `-kiro-api-region`    |
-| `KIROCC_MODEL_DISCOVERY`    | `-model-discovery`    |
-| `KIROCC_KEEPALIVE_INTERVAL` | `-keepalive-interval` |
-| `KIROCC_WEB_SEARCH_PROVIDER` | `-web-search-provider` |
-| `KIROCC_WEB_SEARCH_API_KEY` | `-web-search-api-key` |
-| `KIROCC_WEB_SEARCH_URL` | `-web-search-url` |
-| `KIROCC_WEB_SEARCH_MAX_RESULTS` | `-web-search-max-results` |
-| `KIROCC_DEBUG`              | `-debug`              |
-| `KIROCC_LOG_FILE`           | `-log-file`           |
-| `KIROCC_LOG_MAX_SIZE`       | `-log-max-size`       |
-| `KIROCC_LOG_MAX_BACKUPS`    | `-log-max-backups`    |
-| `KIROCC_LOG_MAX_AGE`        | `-log-max-age`        |
-| `KIROCC_LOG_COMPRESS`       | `-log-compress`       |
-| `KIROCC_LOG_CONSOLE`        | `-log-console`        |
-| `KIROCC_OTEL`               | `-otel`               |
-| `KIROCC_OTEL_BODY_LIMIT`    | `-otel-body-limit`    |
+| Variable                         | Corresponding option       |
+| -------------------------------- | -------------------------- |
+| `KIROCC_PORT`                    | `-port`                    |
+| `KIROCC_HOST`                    | `-host`                    |
+| `KIROCC_DB_PATH`                 | `-db`                      |
+| `KIROCC_API_KEY`                 | `-api-key`                 |
+| `KIRO_API_KEY`                   | `-kiro-api-key`            |
+| `KIRO_API_REGION`                | `-kiro-api-region`         |
+| `KIROCC_MODEL_DISCOVERY`         | `-model-discovery`         |
+| `KIROCC_KEEPALIVE_INTERVAL`      | `-keepalive-interval`      |
+| `KIROCC_RESPONSE_HEADER_TIMEOUT` | `-response-header-timeout` |
+| `KIROCC_WEB_SEARCH_PROVIDER`     | `-web-search-provider`     |
+| `KIROCC_WEB_SEARCH_API_KEY`      | `-web-search-api-key`      |
+| `KIROCC_WEB_SEARCH_URL`          | `-web-search-url`          |
+| `KIROCC_WEB_SEARCH_MAX_RESULTS`  | `-web-search-max-results`  |
+| `KIROCC_DEBUG`                   | `-debug`                   |
+| `KIROCC_LOG_FILE`                | `-log-file`                |
+| `KIROCC_LOG_MAX_SIZE`            | `-log-max-size`            |
+| `KIROCC_LOG_MAX_BACKUPS`         | `-log-max-backups`         |
+| `KIROCC_LOG_MAX_AGE`             | `-log-max-age`             |
+| `KIROCC_LOG_COMPRESS`            | `-log-compress`            |
+| `KIROCC_LOG_CONSOLE`             | `-log-console`             |
+| `KIROCC_OTEL`                    | `-otel`                    |
+| `KIROCC_OTEL_BODY_LIMIT`         | `-otel-body-limit`         |
 
 `KIRO_API_KEY` and `KIRO_API_REGION` intentionally keep Kiro's own names rather than the `KIROCC_` prefix, so a machine already configured for headless kiro-cli needs no kirocc-specific setup.
 
@@ -412,7 +414,7 @@ Supported query forms:
 
 ### Web Search
 
-The Kiro backend has no web search, and Claude Code's `WebSearch` is a *server-side* tool: it sends a side query carrying `tools:[{"type":"web_search_20250305"}]` with `tool_choice` forced to it, and expects whoever answers `/v1/messages` to run the search and reply with `server_tool_use` + `web_search_tool_result` blocks. Forwarding that definition to Kiro as an ordinary function tool returns a plain `tool_use` block instead, which the client discards — so the search reports **zero results with no error**, after billing the request.
+The Kiro backend has no web search, and Claude Code's `WebSearch` is a _server-side_ tool: it sends a side query carrying `tools:[{"type":"web_search_20250305"}]` with `tool_choice` forced to it, and expects whoever answers `/v1/messages` to run the search and reply with `server_tool_use` + `web_search_tool_result` blocks. Forwarding that definition to Kiro as an ordinary function tool returns a plain `tool_use` block instead, which the client discards — so the search reports **zero results with no error**, after billing the request.
 
 kirocc runs the search itself, structured like Tool Search above:
 
@@ -428,12 +430,12 @@ kirocc runs the search itself, structured like Tool Search above:
 kirocc -web-search-provider tavily -web-search-api-key "$TAVILY_API_KEY"
 ```
 
-| Provider | Endpoint | Auth header |
-| --- | --- | --- |
-| `brave` | `api.search.brave.com` | `X-Subscription-Token` |
-| `tavily` | `api.tavily.com` | `Authorization: Bearer` |
-| `exa` | `api.exa.ai` | `x-api-key` |
-| `custom` | `-web-search-url` | `Authorization: Bearer` when a key is set |
+| Provider | Endpoint               | Auth header                               |
+| -------- | ---------------------- | ----------------------------------------- |
+| `brave`  | `api.search.brave.com` | `X-Subscription-Token`                    |
+| `tavily` | `api.tavily.com`       | `Authorization: Bearer`                   |
+| `exa`    | `api.exa.ai`           | `x-api-key`                               |
+| `custom` | `-web-search-url`      | `Authorization: Bearer` when a key is set |
 
 The `custom` provider posts `{"q": "…", "max_results": n}` and reads `{"results": [{"title", "url", "snippet"|"content"|"description", "page_age"|"age"}]}`, so an endpoint written for Claude Desktop's built-in web search server works unchanged.
 
