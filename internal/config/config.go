@@ -22,6 +22,8 @@ const (
 	DefaultMaxRequestBody = 32 << 20
 	// DefaultKeepAliveInterval is the default idle time between SSE keep-alive comments.
 	DefaultKeepAliveInterval = 15 * time.Second
+	// DefaultResponseHeaderTimeout bounds the wait for Kiro's response headers.
+	DefaultResponseHeaderTimeout = 30 * time.Second
 )
 
 // Config is the runtime configuration for kirocc.
@@ -49,6 +51,10 @@ type Config struct {
 	OTel              bool
 	OTelBodyLimit     int
 	KeepAliveInterval time.Duration
+	// ResponseHeaderTimeout bounds the wait for upstream response headers. Kiro
+	// sends headers only once the model starts, so a large prompt can sit here
+	// for a while; a stall past it is retried.
+	ResponseHeaderTimeout time.Duration
 	// MaxRequestBody caps the client request body in bytes. A conversation is
 	// re-sent in full on every turn, so images and long histories push this up
 	// over a session; too low a cap wedges a client permanently, since every
@@ -129,6 +135,9 @@ func ApplyEnvOverrides(cfg *Config) error {
 	if err := applyDuration("KIROCC_KEEPALIVE_INTERVAL", &cfg.KeepAliveInterval); err != nil {
 		return err
 	}
+	if err := applyDuration("KIROCC_RESPONSE_HEADER_TIMEOUT", &cfg.ResponseHeaderTimeout); err != nil {
+		return err
+	}
 	applyString("KIROCC_WEB_SEARCH_PROVIDER", &cfg.WebSearch.Provider)
 	applyString("KIROCC_WEB_SEARCH_API_KEY", &cfg.WebSearch.APIKey)
 	applyString("KIROCC_WEB_SEARCH_URL", &cfg.WebSearch.URL)
@@ -175,6 +184,9 @@ func (c *Config) Validate() error {
 	}
 	if c.KeepAliveInterval != 0 && c.KeepAliveInterval < time.Second {
 		return fmt.Errorf("keepalive-interval must be 0 or >= 1s, got %s", c.KeepAliveInterval)
+	}
+	if c.ResponseHeaderTimeout < 0 {
+		return fmt.Errorf("response-header-timeout must be >= 0, got %s", c.ResponseHeaderTimeout)
 	}
 	if c.KiroAPIRegion != "" {
 		if len(c.KiroAPIRegion) > maxRegionLen || !regionPattern.MatchString(c.KiroAPIRegion) {
