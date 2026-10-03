@@ -96,8 +96,9 @@ var headerValueSizes = map[byte]int{
 }
 
 // extractFrameHeaders walks the headers bytes and returns the values of
-// :message-type and :event-type (or :exception-type) headers.
-func extractFrameHeaders(headers []byte) (msgType, eventType string) {
+// :message-type and :event-type (or :exception-type) headers, plus the
+// :error-code and :error-message headers of an unmodeled error.
+func extractFrameHeaders(headers []byte) (msgType, eventType, errorCode, errorMessage string) {
 	i := 0
 	for i < len(headers) {
 		nameLen := int(headers[i])
@@ -143,8 +144,12 @@ func extractFrameHeaders(headers []byte) (msgType, eventType string) {
 				msgType = string(value)
 			case ":event-type", ":exception-type":
 				eventType = string(value)
+			case ":error-code":
+				errorCode = string(value)
+			case ":error-message":
+				errorMessage = string(value)
 			}
 		}
 	}
-	return msgType, eventType
+	return msgType, eventType, errorCode, errorMessage
 }
