@@ -97,7 +97,22 @@ func ParseStream(ctx context.Context, r io.Reader, callback func(Event) bool) er
 			return err
 		}
 
-		msgType, eventType := extractFrameHeaders(headers)
+		msgType, eventType, errorCode, errorMessage := extractFrameHeaders(headers)
+
+		// Unmodeled errors carry their details in headers, without an event
+		// type or JSON payload. Use the existing terminal-exception path so
+		// callers cannot mistake an upstream failure for a successful EOF.
+		if msgType == "error" {
+			if errorMessage == "" {
+				errorMessage = "upstream error frame"
+			}
+			callback(Event{
+				Type:               EventException,
+				ErrorMessage:       errorMessage,
+				InvalidStateReason: errorCode,
+			})
+			return nil
+		}
 
 		// Handle exception frames (stream-level errors).
 		if msgType == "exception" {
