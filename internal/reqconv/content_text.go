@@ -56,8 +56,19 @@ func textualizeUnknownBlock(b anthropic.ContentBlock) string {
 	return "[" + b.Type + "]"
 }
 
+// billingHeaderPrefix identifies Claude Code's standalone attribution block.
+// Its per-request cch value changes the prompt prefix without adding instructions.
+const billingHeaderPrefix = "x-anthropic-billing-header:"
+
+// isBillingHeaderBlock reports whether text is Claude Code's attribution block and nothing else.
+func isBillingHeaderBlock(text string) bool {
+	t := strings.TrimSpace(text)
+	return strings.HasPrefix(t, billingHeaderPrefix) && !strings.ContainsAny(t, "\r\n")
+}
+
 // ExtractSystemPrompt extracts the system prompt text from the SystemPrompt union type.
-// String form returns as-is. Array form joins text blocks with "\n".
+// String form returns as-is. Array form joins text blocks with "\n", skipping Claude Code's
+// per-request billing block.
 func ExtractSystemPrompt(system anthropic.SystemPrompt) string {
 	if system.IsEmpty() {
 		return ""
@@ -67,7 +78,7 @@ func ExtractSystemPrompt(system anthropic.SystemPrompt) string {
 	}
 	var parts []string
 	for _, block := range system.Blocks {
-		if block.Type == anthropic.BlockTypeText && block.Text != "" {
+		if block.Type == anthropic.BlockTypeText && block.Text != "" && !isBillingHeaderBlock(block.Text) {
 			parts = append(parts, block.Text)
 		}
 	}
