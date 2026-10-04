@@ -3,6 +3,8 @@ package reqconv
 import (
 	"log/slog"
 	"maps"
+	"slices"
+	"strings"
 )
 
 // unsupportedKeywords lists JSON Schema keywords that Kiro API rejects.
@@ -93,17 +95,22 @@ func SanitizeJSONSchema(schema map[string]any) map[string]any {
 					if m, ok := nonNull[0].(map[string]any); ok {
 						maps.Copy(result, SanitizeJSONSchema(m))
 					}
-				} else if first, ok := arr[0].(map[string]any); ok {
-					slog.Warn("lossy schema conversion: using first branch only",
-						"combinator", key, "branches", len(arr))
-					maps.Copy(result, SanitizeJSONSchema(first))
+				} else if merged := mergeBranches(nonNull); merged != nil {
+					// Keep every branch instead of silently using the first one. A widened
+					// (untyped) merge must also drop a sibling "type", or it would re-narrow the schema.
+					if _, typed := merged["type"]; !typed {
+						delete(result, "type")
+					}
+					maps.Copy(result, merged)
 				}
 			}
 		case "allOf":
 			if arr, ok := value.([]any); ok {
 				for _, item := range arr {
 					if m, ok := item.(map[string]any); ok {
-						maps.Copy(result, SanitizeJSONSchema(m))
+						// Deep-merge properties/required instead of letting a later
+						// branch's "properties" replace an earlier one wholesale.
+						mergeObjectInto(result, SanitizeJSONSchema(m), true)
 					}
 				}
 			}
@@ -202,4 +209,211 @@ func flattenEnumBranches(branches []any) map[string]any {
 		merged["type"] = typ
 	}
 	return merged
+}
+
+// mergeBranches approximates alternatives without retaining only the first branch.
+// Objects union their properties and intersect required keys; shared properties are
+// merged recursively. A shared primitive type is retained, while mixed types are
+// widened and described for the model. This necessarily loses union constraints.
+func mergeBranches(branches []any) map[string]any {
+	var sanitized []map[string]any
+	for _, b := range branches {
+		m, ok := b.(map[string]any)
+		if !ok {
+			return nil
+		}
+		sanitized = append(sanitized, SanitizeJSONSchema(m))
+	}
+	if len(sanitized) == 0 {
+		return nil
+	}
+	types := map[string]bool{}
+	for _, s := range sanitized {
+		t, _ := s["type"].(string)
+		if t == "" && s["properties"] != nil {
+			t = "object"
+		}
+		types[t] = true
+	}
+	if len(types) == 1 {
+		var only string
+		for t := range types {
+			only = t
+		}
+		result := map[string]any{}
+		if only == "object" {
+			for i, s := range sanitized {
+				mergeObjectInto(result, s, i == 0)
+			}
+			// A property defined by several branches (a discriminator such as kind: fast | full) must
+			// accept every branch's value; keeping the first branch's definition would re-introduce the
+			// exact truncation this merge exists to remove.
+			if props, ok := result["properties"].(map[string]any); ok {
+				for name := range props {
+					var defs []any
+					for _, s := range sanitized {
+						if sp, ok := s["properties"].(map[string]any); ok {
+							if d, ok := sp[name]; ok {
+								defs = append(defs, d)
+							}
+						}
+					}
+					if len(defs) > 1 {
+						props[name] = mergePropertyDefs(defs)
+					}
+				}
+			}
+			// Keep only keys every branch requires: a key required by one branch alone would make
+			// the other branches' valid inputs fail.
+			result["required"] = intersectRequired(sanitized)
+			if req, ok := result["required"].([]any); !ok || len(req) == 0 {
+				delete(result, "required")
+			}
+			result["type"] = "object"
+			return result
+		}
+		for _, s := range sanitized {
+			for k, v := range s {
+				if k == "enum" {
+					continue
+				}
+				if _, seen := result[k]; !seen {
+					result[k] = v
+				}
+			}
+		}
+		if enums := unionEnums(sanitized); enums != nil {
+			result["enum"] = enums
+		}
+		if only != "" {
+			result["type"] = only
+		}
+		return result
+	}
+	slog.Debug("schema conversion: mixed-type anyOf/oneOf widened to an untyped schema", "types", len(types))
+	names := make([]string, 0, len(types))
+	for t := range types {
+		if t != "" {
+			names = append(names, t)
+		}
+	}
+	slices.Sort(names)
+	result := map[string]any{}
+	for _, s := range sanitized {
+		if d, ok := s["description"].(string); ok && d != "" {
+			result["description"] = d
+			break
+		}
+	}
+	if len(names) > 0 {
+		note := "Accepts one of: " + strings.Join(names, ", ") + "."
+		if d, ok := result["description"].(string); ok {
+			note = d + " " + note
+		}
+		result["description"] = note
+	}
+	return result
+}
+
+// mergePropertyDefs merges the definitions one property has in several anyOf/oneOf branches, using
+// the same rules as the branches themselves: enums unioned, one shared type kept, mixed types widened.
+func mergePropertyDefs(defs []any) any {
+	for _, d := range defs {
+		if _, ok := d.(map[string]any); !ok {
+			return defs[0]
+		}
+	}
+	if merged := flattenEnumBranches(defs); merged != nil {
+		return merged
+	}
+	if merged := mergeBranches(defs); merged != nil {
+		return merged
+	}
+	return defs[0]
+}
+
+// mergeObjectInto merges src into dst: properties are unioned (existing keys kept), other keys are
+// copied when absent. When unionRequired is true, required lists are unioned (allOf semantics).
+func mergeObjectInto(dst, src map[string]any, unionRequired bool) {
+	for k, v := range src {
+		switch k {
+		case "properties":
+			props, _ := dst["properties"].(map[string]any)
+			if props == nil {
+				props = map[string]any{}
+			}
+			if sp, ok := v.(map[string]any); ok {
+				for pk, pv := range sp {
+					if _, exists := props[pk]; !exists {
+						props[pk] = pv
+					}
+				}
+			}
+			dst["properties"] = props
+		case "required":
+			if !unionRequired {
+				continue
+			}
+			seen := map[string]bool{}
+			var out []any
+			for _, list := range []any{dst["required"], v} {
+				if arr, ok := list.([]any); ok {
+					for _, r := range arr {
+						if s, ok := r.(string); ok && !seen[s] {
+							seen[s] = true
+							out = append(out, s)
+						}
+					}
+				}
+			}
+			if len(out) > 0 {
+				dst["required"] = out
+			}
+		default:
+			if _, exists := dst[k]; !exists {
+				dst[k] = v
+			}
+		}
+	}
+}
+
+func intersectRequired(schemas []map[string]any) []any {
+	count := map[string]int{}
+	var order []string
+	for _, s := range schemas {
+		arr, _ := s["required"].([]any)
+		seen := map[string]bool{}
+		for _, r := range arr {
+			if str, ok := r.(string); ok && !seen[str] {
+				seen[str] = true
+				if count[str] == 0 {
+					order = append(order, str)
+				}
+				count[str]++
+			}
+		}
+	}
+	var out []any
+	for _, k := range order {
+		if count[k] == len(schemas) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// unionEnums returns the union of enum values when every schema has an enum, else nil (an
+// unconstrained branch means any value is allowed, so no enum may be kept).
+func unionEnums(schemas []map[string]any) []any {
+	var out []any
+	for _, s := range schemas {
+		arr, ok := s["enum"].([]any)
+		if !ok {
+			return nil
+		}
+		// Repeated values are harmless, and enum values may be non-comparable objects
+		// or arrays. Match flattenEnumBranches rather than comparing interface values.
+		out = append(out, arr...)
+	}
+	return out
 }

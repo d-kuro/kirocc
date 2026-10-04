@@ -3,6 +3,7 @@ package reqconv
 import (
 	"bytes"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 
@@ -199,8 +200,8 @@ func TestSanitizeJSONSchema_OneOfNullable_NoWarning(t *testing.T) {
 	}
 }
 
-func TestSanitizeJSONSchema_AnyOfNullableMultiNonNull_LogsWarning(t *testing.T) {
-	// When null is removed but 2+ non-null branches remain, lossy fallback should still fire.
+// Multi-branch anyOf/oneOf is merged instead of truncated to the first branch.
+func TestSanitizeJSONSchema_AnyOfNullableMultiNonNull_WidensWithoutWarning(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	old := slog.Default()
@@ -216,52 +217,90 @@ func TestSanitizeJSONSchema_AnyOfNullableMultiNonNull_LogsWarning(t *testing.T) 
 	}
 	got := SanitizeJSONSchema(schema)
 
-	if got["type"] != "string" {
-		t.Fatalf("expected first non-null branch type, got %v", got["type"])
+	if _, ok := got["type"]; ok {
+		t.Fatalf("string|integer must not be narrowed to one type, got %v", got["type"])
 	}
-	if !strings.Contains(buf.String(), "anyOf") {
-		t.Fatalf("expected lossy warning, got: %q", buf.String())
+	if d, _ := got["description"].(string); !strings.Contains(d, "integer") || !strings.Contains(d, "string") {
+		t.Fatalf("description should list the alternatives, got %q", d)
 	}
-}
-
-func TestSanitizeJSONSchema_AnyOfNonEnum_LogsWarning(t *testing.T) {
-	// When anyOf has non-enum branches, the lossy first-branch fallback should log a warning.
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	old := slog.Default()
-	slog.SetDefault(logger)
-	defer slog.SetDefault(old)
-
-	schema := map[string]any{
-		"anyOf": []any{
-			map[string]any{"type": "string"},
-			map[string]any{"type": "number"},
-		},
-	}
-	SanitizeJSONSchema(schema)
-
-	if !strings.Contains(buf.String(), "anyOf") {
-		t.Fatalf("expected warning log about anyOf lossy conversion, got: %q", buf.String())
+	if buf.Len() > 0 {
+		t.Fatalf("expected no warning, got: %q", buf.String())
 	}
 }
 
-func TestSanitizeJSONSchema_OneOfNonEnum_LogsWarning(t *testing.T) {
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	old := slog.Default()
-	slog.SetDefault(logger)
-	defer slog.SetDefault(old)
-
+func TestSanitizeJSONSchema_OneOfObjects_UnionPropertiesIntersectRequired(t *testing.T) {
 	schema := map[string]any{
 		"oneOf": []any{
-			map[string]any{"type": "string"},
-			map[string]any{"type": "number"},
+			map[string]any{"type": "object", "properties": map[string]any{
+				"path": map[string]any{"type": "string"}, "mode": map[string]any{"type": "string"}},
+				"required": []any{"path", "mode"}},
+			map[string]any{"type": "object", "properties": map[string]any{
+				"path": map[string]any{"type": "string"}, "url": map[string]any{"type": "string"}},
+				"required": []any{"path"}},
 		},
 	}
-	SanitizeJSONSchema(schema)
+	got := SanitizeJSONSchema(schema)
+	props, _ := got["properties"].(map[string]any)
+	for _, k := range []string{"path", "mode", "url"} {
+		if _, ok := props[k]; !ok {
+			t.Fatalf("property %q from some branch was dropped: %v", k, props)
+		}
+	}
+	req, _ := got["required"].([]any)
+	if len(req) != 1 || req[0] != "path" {
+		t.Fatalf("only keys every branch requires may stay required, got %v", got["required"])
+	}
+	if got["type"] != "object" {
+		t.Fatalf("type = %v, want object", got["type"])
+	}
+}
 
-	if !strings.Contains(buf.String(), "oneOf") {
-		t.Fatalf("expected warning log about oneOf lossy conversion, got: %q", buf.String())
+// A shared discriminator must accept values from every branch, not only the first.
+func TestSanitizeJSONSchema_OneOfObjects_MergesSharedDiscriminator(t *testing.T) {
+	schema := map[string]any{"oneOf": []any{
+		map[string]any{"type": "object", "properties": map[string]any{"kind": map[string]any{"const": "fast"}}, "required": []any{"kind"}},
+		map[string]any{"type": "object", "properties": map[string]any{"kind": map[string]any{"const": "full"}, "depth": map[string]any{"type": "integer"}}, "required": []any{"kind"}},
+	}}
+	got := SanitizeJSONSchema(schema)
+	props, _ := got["properties"].(map[string]any)
+	kind, _ := props["kind"].(map[string]any)
+	enum, _ := kind["enum"].([]any)
+	if len(enum) != 2 || !slices.Contains(enum, any("fast")) || !slices.Contains(enum, any("full")) {
+		t.Fatalf("kind must accept both branch values, got %v", props["kind"])
+	}
+	if props["depth"] == nil {
+		t.Fatal("depth from the second branch was dropped")
+	}
+	req, _ := got["required"].([]any)
+	if len(req) != 1 || req[0] != "kind" {
+		t.Fatalf("required = %v, want [kind]", got["required"])
+	}
+}
+
+func TestUnionEnums_CompoundValues(t *testing.T) {
+	values := []any{map[string]any{"mode": "fast"}, []any{"full", "deep"}}
+	got := unionEnums([]map[string]any{{"enum": values}, {"enum": values}})
+	if len(got) != 4 {
+		t.Fatalf("compound enum values lost: %v", got)
+	}
+	if got := unionEnums([]map[string]any{{"enum": values}, {}}); got != nil {
+		t.Fatalf("unconstrained branch must remove enum restriction: %v", got)
+	}
+}
+
+func TestSanitizeJSONSchema_AnyOfSamePrimitive_KeepsType(t *testing.T) {
+	schema := map[string]any{
+		"anyOf": []any{
+			map[string]any{"type": "string", "description": "a path"},
+			map[string]any{"type": "string", "description": "a glob"},
+		},
+	}
+	got := SanitizeJSONSchema(schema)
+	if got["type"] != "string" {
+		t.Fatalf("type = %v, want string", got["type"])
+	}
+	if _, ok := got["enum"]; ok {
+		t.Fatal("unconstrained branches must not produce an enum")
 	}
 }
 
@@ -286,7 +325,7 @@ func TestSanitizeJSONSchema_AnyOfEnum_NoWarning(t *testing.T) {
 	}
 }
 
-func TestSanitizeJSONSchema_AnyOfNonEnum_UsesFirstBranch(t *testing.T) {
+func TestSanitizeJSONSchema_AnyOfNonEnum_KeepsEveryBranchValid(t *testing.T) {
 	schema := map[string]any{
 		"anyOf": []any{
 			map[string]any{"type": "string", "description": "a string"},
@@ -297,8 +336,8 @@ func TestSanitizeJSONSchema_AnyOfNonEnum_UsesFirstBranch(t *testing.T) {
 	if _, ok := got["anyOf"]; ok {
 		t.Fatal("anyOf should be removed")
 	}
-	if got["type"] != "string" {
-		t.Fatalf("expected type from first branch, got %v", got["type"])
+	if _, ok := got["type"]; ok {
+		t.Fatalf("string|number must not be narrowed to the first branch, got type %v", got["type"])
 	}
 }
 
@@ -363,6 +402,25 @@ func TestSanitizeJSONSchema_AllOfMerged(t *testing.T) {
 	}
 }
 
+// allOf must not let a later branch's properties replace earlier ones.
+func TestSanitizeJSONSchema_AllOfDeepMergesProperties(t *testing.T) {
+	schema := map[string]any{
+		"allOf": []any{
+			map[string]any{"type": "object", "properties": map[string]any{"a": map[string]any{"type": "string"}}, "required": []any{"a"}},
+			map[string]any{"properties": map[string]any{"b": map[string]any{"type": "integer"}}, "required": []any{"b"}},
+		},
+	}
+	got := SanitizeJSONSchema(schema)
+	props, _ := got["properties"].(map[string]any)
+	if props["a"] == nil || props["b"] == nil {
+		t.Fatalf("both branches' properties must survive, got %v", props)
+	}
+	req, _ := got["required"].([]any)
+	if len(req) != 2 {
+		t.Fatalf("allOf requires the union, got %v", got["required"])
+	}
+}
+
 func TestSanitizeJSONSchema_RemovesValidationKeywords(t *testing.T) {
 	keywords := []string{
 		"format", "pattern",
@@ -401,8 +459,8 @@ func TestSanitizeJSONSchema_RemovesPatternProperties(t *testing.T) {
 }
 
 func TestSanitizeJSONSchema_AnyOfOverridesType_Deterministic(t *testing.T) {
-	// anyOf first-branch has type "string", but schema also has type "object".
-	// Combinator should always win regardless of map iteration order.
+	// A widened string|number anyOf must drop the sibling type "object" every time, regardless of map
+	// iteration order: keeping it would reject every valid value.
 	schema := map[string]any{
 		"type": "object",
 		"anyOf": []any{
@@ -410,11 +468,10 @@ func TestSanitizeJSONSchema_AnyOfOverridesType_Deterministic(t *testing.T) {
 			map[string]any{"type": "number"},
 		},
 	}
-	// Run multiple times to catch map iteration order flakiness.
 	for i := range 100 {
 		got := SanitizeJSONSchema(schema)
-		if got["type"] != "string" {
-			t.Fatalf("iteration %d: type = %v, want string (combinator should override)", i, got["type"])
+		if _, ok := got["type"]; ok {
+			t.Fatalf("iteration %d: type = %v, want none (widened union)", i, got["type"])
 		}
 	}
 }
