@@ -51,9 +51,9 @@ func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, sess
 
 	var reason string
 	if inv.req.Stream {
-		reason = s.handleStreamingResponse(ctx, session, apiResp, inv.model, inv.responseModel, inv.contextWindowSize, inv.req.StopSequences, inv.req.MaxTokens, apiResp.PromptTokens, capture, inv.toolNameMap)
+		reason = s.handleStreamingResponse(ctx, session, apiResp, inv.model, inv.responseModel, inv.contextWindowSize, inv.req.StopSequences, inv.req.MaxTokens, apiResp.PromptTokens, capture, inv.toolNameMap, inv.req)
 	} else {
-		reason = s.handleNonStreamingResponse(ctx, w, apiResp, inv.responseModel, inv.contextWindowSize, inv.req.StopSequences, inv.req.MaxTokens, apiResp.PromptTokens, capture, inv.toolNameMap)
+		reason = s.handleNonStreamingResponse(ctx, w, apiResp, inv.responseModel, inv.contextWindowSize, inv.req.StopSequences, inv.req.MaxTokens, apiResp.PromptTokens, capture, inv.toolNameMap, inv.req)
 	}
 	if reason == retryReasonEmptyVisibleEndTurn {
 		capture.logCapture(ctx, reason)
