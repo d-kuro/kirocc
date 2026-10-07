@@ -172,13 +172,7 @@ func estimateImageTokens(b64 string) int {
 	if err != nil {
 		return fallbackImageTokens
 	}
-	// ceil(width*height/750), matching Anthropic's documented image formula.
-	tokens := (cfg.Width*cfg.Height + 749) / 750
-	if tokens < 1 {
-		tokens = 1
-	}
-	if tokens > maxImageTokens {
-		tokens = maxImageTokens
-	}
-	return tokens
+	// ceil(width*height/750), matching Anthropic's documented image formula,
+	// floored at 1 token and capped at maxImageTokens.
+	return min(max((cfg.Width*cfg.Height+749)/750, 1), maxImageTokens)
 }
