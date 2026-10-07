@@ -78,10 +78,10 @@ type HTTPClient struct {
 	otel           bool
 	otelBodyLimit  int
 	tokenRefresher TokenRefresher
-	countTokens    func([]byte) (int, error) // nil = skip token counting
-	bodyReadIdle   time.Duration             // idle timeout for response body reads; 0 = use default
-	apiKeyAuth     bool                      // send TokenType: API_KEY with the bearer
-	headerTimeout  time.Duration             // wait for response headers; 0 = no limit
+	countTokens    func(*kiroproto.Payload) (int, error) // nil = skip token counting
+	bodyReadIdle   time.Duration                         // idle timeout for response body reads; 0 = use default
+	apiKeyAuth     bool                                  // send TokenType: API_KEY with the bearer
+	headerTimeout  time.Duration                         // wait for response headers; 0 = no limit
 }
 
 // HTTPClientOption configures an HTTPClient.
@@ -120,8 +120,8 @@ func WithAPIKeyAuth() HTTPClientOption {
 	return func(c *HTTPClient) { c.apiKeyAuth = true }
 }
 
-// WithTokenCounter sets a function to count prompt tokens from the serialized payload.
-func WithTokenCounter(fn func([]byte) (int, error)) HTTPClientOption {
+// WithTokenCounter sets a function to count prompt tokens from the payload.
+func WithTokenCounter(fn func(*kiroproto.Payload) (int, error)) HTTPClientOption {
 	return func(c *HTTPClient) { c.countTokens = fn }
 }
 
@@ -223,7 +223,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 
 	var promptTokens int
 	if c.countTokens != nil {
-		n, err := c.countTokens(body)
+		n, err := c.countTokens(payload)
 		if err != nil {
 			slog.Debug("tokencount: failed to count prompt tokens", "err", err)
 		} else {
