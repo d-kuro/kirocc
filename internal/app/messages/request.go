@@ -60,13 +60,7 @@ func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := json.Marshal(payload)
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, errTypeAPI, "failed to serialize payload")
-		return
-	}
-
-	n, err := tokencount.CountBytes(data)
+	n, err := tokencount.CountPayload(payload)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, errTypeAPI, "token counting unavailable")
 		return

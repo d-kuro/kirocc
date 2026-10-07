@@ -160,7 +160,7 @@ func parseFlags(args []string) (config.Config, error) {
 
 func buildKiroClient(authMgr *auth.AuthManager, cfg config.Config) kiroclient.Client {
 	clientOpts := []kiroclient.HTTPClientOption{
-		kiroclient.WithTokenCounter(tokencount.CountBytes),
+		kiroclient.WithTokenCounter(tokencount.CountPayload),
 		kiroclient.WithTokenRefresher(func(ctx context.Context) (string, error) {
 			// Invalidate cache so GetToken re-reads from DB and refreshes
 			// instead of returning the same rejected token.
