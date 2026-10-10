@@ -21,6 +21,7 @@ type Service struct {
 	client            kiroclient.Client
 	captureEnabled    bool
 	keepAliveInterval time.Duration
+	promoteOnThinking bool
 	maxRequestBody    int64
 	// webSearch runs the searches for an emulated web_search_20250305 tool.
 	// Nil disables the emulation, in which case a request carrying that tool is
@@ -52,6 +53,14 @@ func WithWebSearch(provider websearch.Provider, maxResults int) Option {
 // A zero duration disables the heartbeat.
 func WithKeepAliveInterval(interval time.Duration) Option {
 	return func(s *Service) { s.keepAliveInterval = interval }
+}
+
+// WithPromoteOnThinking lets thinking deltas open the output gate early, so
+// reasoning streams progressively instead of being held until the first
+// visible output. Enabling it trades away the transparent retry of
+// thinking-only responses, which requires the gate to stay closed.
+func WithPromoteOnThinking(enabled bool) Option {
+	return func(s *Service) { s.promoteOnThinking = enabled }
 }
 
 // WithMaxRequestBody caps the client request body in bytes. Zero disables the

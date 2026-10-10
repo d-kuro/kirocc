@@ -47,6 +47,13 @@ func WithMaxRequestBody(limit int64) ServerOption {
 	return func(s *Server) { s.maxRequestBody = limit }
 }
 
+// WithPromoteOnThinking lets thinking deltas open the streaming output gate
+// early so reasoning streams progressively. See
+// messages.WithPromoteOnThinking for the trade-off.
+func WithPromoteOnThinking(enabled bool) ServerOption {
+	return func(s *Server) { s.promoteOnThinking = enabled }
+}
+
 // Server is the HTTP server for the kirocc proxy.
 type Server struct {
 	apiKey              string
@@ -54,6 +61,7 @@ type Server struct {
 	otelBodyLimit       int
 	captureEnabled      bool
 	keepAliveInterval   time.Duration
+	promoteOnThinking   bool
 	maxRequestBody      int64
 	webSearch           websearch.Provider
 	webSearchMaxResults int
@@ -74,6 +82,7 @@ func New(authMgr messagesapp.TokenGetter, apiKey string, client kiroclient.Clien
 	s.messages = messagesapp.New(authMgr, client,
 		messagesapp.WithCapture(s.captureEnabled),
 		messagesapp.WithKeepAliveInterval(s.keepAliveInterval),
+		messagesapp.WithPromoteOnThinking(s.promoteOnThinking),
 		messagesapp.WithMaxRequestBody(s.maxRequestBody),
 		messagesapp.WithWebSearch(s.webSearch, s.webSearchMaxResults),
 	)

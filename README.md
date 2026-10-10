@@ -112,6 +112,7 @@ API keys are available for Kiro Pro, Pro+, Pro Max, and Power subscribers. On gr
 | `-kiro-api-region`         | (credential's region)     | Region for Kiro API endpoints (`runtime.<region>.kiro.dev`)                                      |
 | `-model-discovery`         | `true`                    | Fetch Kiro's model catalog at startup                                                            |
 | `-keepalive-interval`      | `15s`                     | SSE idle keep-alive interval (0 = disabled)                                                      |
+| `-promote-on-thinking`     | `false`                   | Let thinking deltas open the output gate early: reasoning streams progressively; thinking-only turns are no longer retried transparently |
 | `-response-header-timeout` | `30s`                     | Max wait for Kiro response headers (0 = no limit, otherwise >= 1s)                               |
 | `-web-search-provider`     | (none)                    | Run `web_search_20250305` proxy-side via `brave`, `tavily`, `exa` or `custom`; empty disables it |
 | `-web-search-api-key`      | (none)                    | API key for the search provider                                                                  |
@@ -149,6 +150,7 @@ Command-line options can be overridden with environment variables.
 | `KIRO_API_REGION`                | `-kiro-api-region`         |
 | `KIROCC_MODEL_DISCOVERY`         | `-model-discovery`         |
 | `KIROCC_KEEPALIVE_INTERVAL`      | `-keepalive-interval`      |
+| `KIROCC_PROMOTE_ON_THINKING`     | `-promote-on-thinking`     |
 | `KIROCC_RESPONSE_HEADER_TIMEOUT` | `-response-header-timeout` |
 | `KIROCC_WEB_SEARCH_PROVIDER`     | `-web-search-provider`     |
 | `KIROCC_WEB_SEARCH_API_KEY`      | `-web-search-api-key`      |
@@ -306,7 +308,9 @@ flowchart TB
    - Parses `<thinking>` tags from `assistantResponseEvent` or uses `reasoningContentEvent` (with deduplication)
    - Enforces `stop_sequences` and `max_tokens` adapter-side
    - Detects truncated responses and stores them; a notice is injected into the next request
-   - Gate Writer buffers output until visible content arrives, enabling transparent retry of thinking-only responses
+   - Gate Writer buffers output until visible content arrives, enabling transparent retry of thinking-only responses;
+     with `-promote-on-thinking` / `KIROCC_PROMOTE_ON_THINKING=true` the gate opens on the first thinking
+     delta instead, so reasoning streams progressively at the cost of that retry
 
 ### Extended Thinking
 
