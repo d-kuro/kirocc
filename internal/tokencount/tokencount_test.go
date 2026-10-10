@@ -1,6 +1,7 @@
 package tokencount
 
 import (
+	"strings"
 	"sync"
 	"testing"
 )
@@ -68,5 +69,36 @@ func TestCountBytes_Concurrent(t *testing.T) {
 
 	for err := range errs {
 		t.Fatalf("concurrent call failed: %v", err)
+	}
+}
+
+func TestCountBytes_ImageIgnoresBase64Size(t *testing.T) {
+	build := func(n int) []byte {
+		return []byte(`{"images":[{"format":"png","source":{"bytes":"` + strings.Repeat("QUJD", n) + `"}}],"content":"hi"}`)
+	}
+	small, err := CountBytes(build(10))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	large, err := CountBytes(build(200_000))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if small != large {
+		t.Fatalf("image size changed count: %d vs %d", small, large)
+	}
+	if small < imageTokens || small > imageTokens+100 {
+		t.Fatalf("expected about %d tokens, got %d", imageTokens, small)
+	}
+}
+
+func TestCountBytes_MultipleImages(t *testing.T) {
+	one := `{"source":{"bytes":"QUJD"}}`
+	got, err := CountBytes([]byte(`[` + one + `,` + one + `,` + one + `]`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got < 3*imageTokens {
+		t.Fatalf("expected at least %d tokens, got %d", 3*imageTokens, got)
 	}
 }

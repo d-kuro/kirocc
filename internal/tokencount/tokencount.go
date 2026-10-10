@@ -1,12 +1,19 @@
 package tokencount
 
 import (
+	"bytes"
 	"sync"
 
 	tiktoken "github.com/pkoukk/tiktoken-go"
 )
 
 const encodingName = "cl100k_base"
+
+// imageTokens approximates the prompt cost of one image. Base64 image data is
+// excluded from tokenization because it inflates the count by 100x or more.
+const imageTokens = 1600
+
+var imageBytesKey = []byte(`"bytes":"`)
 
 var (
 	enc  *tiktoken.Tiktoken
@@ -56,5 +63,31 @@ func CountBytes(data []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return len(e.Encode(string(data), nil, nil)), nil
+	text, images := stripImages(data)
+	return len(e.Encode(string(text), nil, nil)) + images*imageTokens, nil
+}
+
+// stripImages removes base64 image payloads ("bytes" values in the Kiro
+// payload) and returns the remaining data with the number of images removed.
+func stripImages(data []byte) ([]byte, int) {
+	var out []byte
+	images := 0
+	for {
+		i := bytes.Index(data, imageBytesKey)
+		if i < 0 {
+			break
+		}
+		start := i + len(imageBytesKey)
+		end := bytes.IndexByte(data[start:], '"')
+		if end < 0 {
+			break
+		}
+		out = append(out, data[:start]...)
+		data = data[start+end:]
+		images++
+	}
+	if images == 0 {
+		return data, 0
+	}
+	return append(out, data...), images
 }
