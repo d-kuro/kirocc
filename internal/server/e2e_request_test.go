@@ -6,6 +6,24 @@ import (
 	"testing"
 )
 
+// TestE2E_NoSessionHeader confirms /v1/messages serves requests that omit the
+// X-Claude-Code-Session-Id header, falling back to a generated conversation id.
+func TestE2E_NoSessionHeader(t *testing.T) {
+	client := &capturingClient{events: []any{"assistantResponseEvent", mustJSON(map[string]string{"content": "ok"})}}
+
+	srv := newE2EServer(t, client)
+	defer srv.Close()
+
+	resp := postMessagesNoSession(t, srv.URL, `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	defer func() { _ = resp.Body.Close() }()
+
+	requireStatus(t, resp, 200)
+	requireCaptured(t, client)
+	if client.captured.ConversationState.ConversationID == "" {
+		t.Fatal("expected a generated conversation id, got empty")
+	}
+}
+
 func TestE2E_ToolUseFlow(t *testing.T) {
 	toolEvent := mustJSON(map[string]any{
 		"name":      "get_weather",

@@ -65,6 +65,22 @@ func postMessages(t *testing.T, url, body string) *http.Response {
 	return resp
 }
 
+// postMessagesNoSession posts to /v1/messages without the session-id header,
+// exercising the optional-header path.
+func postMessagesNoSession(t *testing.T, url, body string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url+"/v1/messages", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
 func mustJSON(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
