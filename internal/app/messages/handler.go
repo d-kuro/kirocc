@@ -16,6 +16,7 @@ import (
 	"github.com/d-kuro/kirocc/internal/reqconv"
 	"github.com/d-kuro/kirocc/internal/toolsearch"
 	"github.com/d-kuro/kirocc/internal/websearch"
+	"github.com/google/uuid"
 )
 
 const headerCCSessionID = "X-Claude-Code-Session-Id"
@@ -41,10 +42,15 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The header carries the Claude Code session ID, used as the Kiro
+	// conversationId. Honour it when present, but it is optional: clients that
+	// hit /v1/messages directly (model probes, non-Claude-Code callers) have no
+	// session, so fall back to a per-request UUID rather than reject them.
 	ccSessionID := r.Header.Get(headerCCSessionID)
 	if ccSessionID == "" {
-		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, "missing "+headerCCSessionID+" header")
-		return
+		ccSessionID = uuid.NewString()
+		slog.DebugContext(ctx, "no "+headerCCSessionID+" header; using generated conversation id",
+			"trace_id", short, "conversation_id", ccSessionID)
 	}
 	ctx = logging.WithSessionID(ctx, ccSessionID)
 	r = r.WithContext(ctx)
