@@ -55,7 +55,12 @@ type SSEWriter struct {
 	// (text delta or tool_use) is written. Used by the stream session to promote
 	// the buffered writer to direct mode.
 	OnVisibleOutput func() error
-	visibleFired    bool
+	// PromoteOnThinking lets the first thinking delta fire OnVisibleOutput,
+	// streaming reasoning progressively instead of holding it until the first
+	// visible text/tool_use. When false, the gate stays closed so thinking-only
+	// turns can still be discarded and retried transparently.
+	PromoteOnThinking bool
+	visibleFired      bool
 }
 
 // NewSSEWriter creates a new SSEWriter and sets response headers.
@@ -423,6 +428,9 @@ func (s *SSEWriter) stopOrDrain() bool {
 // writeThinkingDelta writes a thinking_delta SSE event using direct formatting.
 func (s *SSEWriter) writeThinkingDelta(d EventDelta) {
 	s.ensureStarted()
+	if s.PromoteOnThinking {
+		s.fireVisibleOutput()
+	}
 	s.switchBlock(anthropic.BlockTypeThinking)
 	s.writeDelta("thinking_delta", "thinking", d.ThinkingDelta)
 }

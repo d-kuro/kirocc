@@ -142,6 +142,7 @@ func parseFlags(args []string) (config.Config, error) {
 		"results per search; also KIROCC_WEB_SEARCH_MAX_RESULTS")
 	fs.BoolVar(&cfg.Debug, "debug", false, "enable debug logging with OTel JSON Lines output")
 	fs.BoolVar(&cfg.OTel, "otel", false, "enable OpenTelemetry tracing (OTLP HTTP exporter)")
+	fs.BoolVar(&cfg.PromoteOnThinking, "promote-on-thinking", false, "let thinking deltas open the output gate early so reasoning streams progressively (disables transparent retry of thinking-only turns); also KIROCC_PROMOTE_ON_THINKING")
 	fs.IntVar(&cfg.OTelBodyLimit, "otel-body-limit", config.DefaultOTelBodyLimit, "max bytes of request body to capture in OTel spans (0 = unlimited)")
 	fs.Int64Var(&cfg.MaxRequestBody, "max-request-body", config.DefaultMaxRequestBody, "max bytes of a client request body (0 = unlimited); also KIROCC_MAX_REQUEST_BODY")
 	fs.DurationVar(&cfg.KeepAliveInterval, "keepalive-interval", config.DefaultKeepAliveInterval, "SSE idle keep-alive interval (0 = disabled)")
@@ -244,6 +245,7 @@ func discoverModels(ctx context.Context, authMgr *auth.AuthManager, regionOverri
 func buildServer(authMgr *auth.AuthManager, client kiroclient.Client, cfg config.Config, webSearch websearch.Provider) *server.Server {
 	opts := []server.ServerOption{
 		server.WithKeepAliveInterval(cfg.KeepAliveInterval),
+		server.WithPromoteOnThinking(cfg.PromoteOnThinking),
 		server.WithMaxRequestBody(cfg.MaxRequestBody),
 	}
 	if webSearch != nil {

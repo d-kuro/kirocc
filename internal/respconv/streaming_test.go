@@ -668,3 +668,37 @@ func TestSSEWriter_RedactedOnly_StillEmitted(t *testing.T) {
 		t.Fatal("reasoning-only round must still be flagged for retry")
 	}
 }
+
+func TestSSEWriter_PromoteOnThinking(t *testing.T) {
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "claude-sonnet-4.6", 200000, nil, 0, 0)
+	promoted := 0
+	sw.OnVisibleOutput = func() error { promoted++; return nil }
+	sw.PromoteOnThinking = true
+
+	sw.HandleEvent(kiroproto.Event{Type: "reasoningContentEvent", ThinkingText: "Let me think"})
+	if promoted != 1 {
+		t.Fatalf("promoted = %d, want 1 after first thinking delta", promoted)
+	}
+	// Once fired, later content must not fire it again.
+	sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "Answer"})
+	if promoted != 1 {
+		t.Fatalf("promoted = %d, want 1 after text delta too", promoted)
+	}
+}
+
+func TestSSEWriter_ThinkingDoesNotPromoteByDefault(t *testing.T) {
+	w := httptest.NewRecorder()
+	sw := NewSSEWriter(context.Background(), w, "claude-sonnet-4.6", 200000, nil, 0, 0)
+	promoted := 0
+	sw.OnVisibleOutput = func() error { promoted++; return nil }
+
+	sw.HandleEvent(kiroproto.Event{Type: "reasoningContentEvent", ThinkingText: "Let me think"})
+	if promoted != 0 {
+		t.Fatalf("promoted = %d, want 0 while only thinking arrived", promoted)
+	}
+	sw.HandleEvent(kiroproto.Event{Type: "assistantResponseEvent", Content: "Answer"})
+	if promoted != 1 {
+		t.Fatalf("promoted = %d, want 1 after first visible text", promoted)
+	}
+}

@@ -34,6 +34,7 @@ func (s *Service) handleStreamingResponse(ctx context.Context, session *streamSe
 
 	sw := respconv.NewSSEWriter(ctx, session, model, contextWindowSize, stopSequences, maxTokens, preCountedInputTokens)
 	sw.OnVisibleOutput = session.Promote
+	sw.PromoteOnThinking = s.promoteOnThinking
 	sw.SetToolNameMap(toolNameMap)
 	// GPT 5.6 delivers a trailing redacted reasoning blob after tool_use, so
 	// the stream must keep draining past an adapter-side stop to capture it.

@@ -125,6 +125,7 @@ func (o *serverToolOrchestrator) handleStreaming(ctx context.Context, session *s
 
 	sw := respconv.NewSSEWriter(ctx, session, o.responseModel, o.contextWindowSize, o.req.StopSequences, o.req.MaxTokens, 0)
 	sw.OnVisibleOutput = session.Promote
+	sw.PromoteOnThinking = o.service.promoteOnThinking
 	sw.SetDrainOnStop(models.IsReasoningModel(o.buildOpts.ModelID))
 	// Loop-invariant: ResetAccumulator preserves the drop set across rounds.
 	sw.SetDropToolNames(o.dropToolNames()...)

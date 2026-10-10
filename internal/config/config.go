@@ -44,9 +44,14 @@ type Config struct {
 	// ModelDiscovery enables fetching Kiro's model catalog at startup so newly
 	// launched models resolve without a kirocc release. Built-in mappings always
 	// win; discovery only fills gaps.
-	ModelDiscovery    bool
-	Debug             bool
-	OTel              bool
+	ModelDiscovery bool
+	Debug          bool
+	OTel           bool
+	// PromoteOnThinking lets thinking deltas open the streaming output gate
+	// early: reasoning streams progressively instead of being held until the
+	// first visible text/tool_use. Thinking-only turns can then no longer be
+	// discarded and retried transparently.
+	PromoteOnThinking bool
 	OTelBodyLimit     int
 	KeepAliveInterval time.Duration
 	// ResponseHeaderTimeout bounds the wait for upstream response headers. Kiro
@@ -122,6 +127,9 @@ func ApplyEnvOverrides(cfg *Config) error {
 		return err
 	}
 	if err := applyBool("KIROCC_OTEL", &cfg.OTel); err != nil {
+		return err
+	}
+	if err := applyBool("KIROCC_PROMOTE_ON_THINKING", &cfg.PromoteOnThinking); err != nil {
 		return err
 	}
 	if err := applyInt("KIROCC_OTEL_BODY_LIMIT", &cfg.OTelBodyLimit); err != nil {
