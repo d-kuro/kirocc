@@ -56,6 +56,17 @@ kirocc
 
 Listens on `http://127.0.0.1:3456` by default.
 
+### Print the version
+
+```bash
+kirocc -version
+kirocc version
+```
+
+Both print one line and exit. A tagged release looks like `kirocc 0.15.0`. `go build` and `go install` from a checkout print `kirocc dev`; GoReleaser's default `-X main.version` replaces `dev` with the tag when a release is cut.
+
+The line is the binary just executed. The command does not read the credential database, bind the listen port, or apply environment overrides, so it still answers when another kirocc already holds the port or the configuration would fail to start. The process that is actually listening logs the same build as `version=` on its `kirocc listening` line. After `brew upgrade` or `go install`, restart kirocc; that log line is the running build.
+
 ### Use with Claude Code
 
 ```bash
@@ -104,6 +115,7 @@ API keys are available for Kiro Pro, Pro+, Pro Max, and Power subscribers. On gr
 
 | Flag                       | Default                   | Description                                                                                      |
 | -------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------ |
+| `-version`                 | `false`                   | Print the version and exit. `kirocc version` does the same                                       |
 | `-port`                    | `3456`                    | Listen port                                                                                      |
 | `-host`                    | `127.0.0.1`               | Bind host                                                                                        |
 | `-db`                      | (OS-dependent, see below) | Kiro CLI SQLite DB path                                                                          |

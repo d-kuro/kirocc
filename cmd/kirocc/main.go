@@ -27,6 +27,11 @@ import (
 	"github.com/d-kuro/kirocc/internal/websearch"
 )
 
+// version is what -version prints and what the "kirocc listening" line records.
+// Release builds replace it through GoReleaser's default -X main.version.
+// go build and go install leave "dev", so a checkout binary is distinct from a tag.
+var version = "dev"
+
 func main() {
 	if err := run(context.Background(), os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -35,12 +40,18 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) error {
-	cfg, err := parseFlags(args)
+	cfg, showVersion, err := parseFlags(args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
 		return err
+	}
+	// Before env overrides, validation, credentials, and Listen, so the invoked
+	// binary can be identified while another process still holds the port.
+	if showVersion {
+		fmt.Println(versionLine())
+		return nil
 	}
 	if err := config.ApplyEnvOverrides(&cfg); err != nil {
 		return fmt.Errorf("config: %w", err)
@@ -100,7 +111,7 @@ func run(ctx context.Context, args []string) error {
 		slog.Warn("server is binding to a non-loopback address without an API key — all endpoints are unauthenticated",
 			"host", cfg.Host)
 	}
-	slog.Info("kirocc listening", "addr", "http://"+addr)
+	slog.Info("kirocc listening", "version", version, "addr", "http://"+addr)
 	slog.Info("set ANTHROPIC_BASE_URL to use with Claude Code", "url", "http://"+addr)
 
 	httpSrv := &http.Server{
@@ -122,9 +133,11 @@ func run(ctx context.Context, args []string) error {
 	return nil
 }
 
-func parseFlags(args []string) (config.Config, error) {
+func parseFlags(args []string) (config.Config, bool, error) {
 	fs := flag.NewFlagSet("kirocc", flag.ContinueOnError)
 	var cfg config.Config
+	var showVersion bool
+	fs.BoolVar(&showVersion, "version", false, "print version and exit; kirocc version does the same")
 	fs.IntVar(&cfg.Port, "port", 3456, "listen port")
 	fs.StringVar(&cfg.Host, "host", "127.0.0.1", "bind host")
 	fs.StringVar(&cfg.DBPath, "db", config.DefaultDBPath(), "kiro-cli SQLite DB path")
@@ -153,9 +166,22 @@ func parseFlags(args []string) (config.Config, error) {
 	fs.BoolVar(&cfg.LogFile.Compress, "log-compress", false, "compress rotated log files with gzip")
 	fs.BoolVar(&cfg.LogFile.Console, "log-console", false, "also write logs to console when -log-file is set")
 	if err := fs.Parse(args); err != nil {
-		return cfg, err
+		return cfg, false, err
 	}
-	return cfg, nil
+	if !showVersion && versionCommand(args) {
+		showVersion = true
+	}
+	return cfg, showVersion, nil
+}
+
+func versionLine() string {
+	return "kirocc " + version
+}
+
+// versionCommand is the kiro-cli form `kirocc version`. Only a sole argument
+// counts, so a listen command that also carries a positional still starts.
+func versionCommand(args []string) bool {
+	return len(args) == 1 && args[0] == "version"
 }
 
 func buildKiroClient(authMgr *auth.AuthManager, cfg config.Config) kiroclient.Client {
