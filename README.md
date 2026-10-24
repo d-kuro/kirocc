@@ -56,6 +56,9 @@ kirocc
 
 Listens on `http://127.0.0.1:3456` by default.
 
+On Windows, an optional [Scheduled Task helper](scripts/windows/README.md) can
+start kirocc at login, record exit codes, and automatically restart it after exit.
+
 ### Use with Claude Code
 
 ```bash
